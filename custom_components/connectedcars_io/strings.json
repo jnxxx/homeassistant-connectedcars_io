@@ -1,0 +1,30 @@
+{
+    "config": {
+        "error": {
+            "auth": "Authentication failed.",
+            "email": "Email is unknown for this namespace.",
+            "pw": "Incorrect password.",
+            "ns": "Namespace could not be found."
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "email": "Email",
+                    "password": "Password",
+                    "namespace": "Namespace"
+                },
+                "description": "Enter credentials.<br />If you have another car also using connectedcars.io, change the namespace. For example to minskoda or minseat.",
+                "title": "Authentication"
+            },
+            "repo": {
+                "data": {
+                    "add_another": "Add another repo?",
+                    "path": "Path to the repository e.g. boralyl/github-custom",
+                    "name": "Name of the sensor."
+                },
+                "description": "Add a GitHub repo, check the box to add another.",
+                "title": "Add GitHub Repository"
+            }
+        }
+    }
+}

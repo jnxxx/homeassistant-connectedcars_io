@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
 
 from homeassistant import config_entries, core
-from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS
+from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS, DEVICE_CLASS_BATTERY, DEVICE_CLASS_TEMPERATURE
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.components.device_tracker.config_entry import TrackerEntity
@@ -44,212 +44,47 @@ async def async_setup_entry(
         sensors = []
         data = await _connectedcarsclient._get_vehicle_instances()
         for vehicle in data:
-    #        sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "Name", _connectedcarsclient))
-            sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "outdoorTemperature", _connectedcarsclient))
-            sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "BatteryVoltage", _connectedcarsclient))
-            sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "fuelPercentage", _connectedcarsclient))
-            sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "fuelLevel", _connectedcarsclient))
-            sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "odometer", _connectedcarsclient))
-            #sensors.append(MinVwEntity(vehicle, vehicle['id'], vehicle['vin'], vehicle['make'], vehicle['model'], vehicle['name'], "Geocoded Location", _connectedcarsclient))
-            #sensors.append(CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient))
-            #sensors.append(CcBinaryEntity(vehicle, "IgnitionY", "moving", _connectedcarsclient))
+            if "outdoorTemperature" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "outdoorTemperature", True, _connectedcarsclient))
+            if "BatteryVoltage" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "BatteryVoltage", True, _connectedcarsclient))
+            if "fuelPercentage" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "fuelPercentage", True, _connectedcarsclient))
+            if "fuelLevel" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "fuelLevel", True, _connectedcarsclient))
+            if "odometer" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "odometer", True, _connectedcarsclient))
+            if "NextServicePredicted" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "NextServicePredicted", False, _connectedcarsclient))
+            if "EVchargePercentage" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "EVchargePercentage", True, _connectedcarsclient))
+            if "EVHVBattTemp" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "EVHVBattTemp", True, _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
 
-    except Exception:
+    except Exception as e:
+        _LOGGER.warning(f"Failed to add sensors: {e}")
         raise PlatformNotReady
 
-
-# class CcBinaryEntity(BinarySensorEntity):
-#     """Representation of a BinaryEntity."""
-
-#     def __init__(self, vehicle, itemName, device_class, connectedcarsclient):
-#         self._vehicle = vehicle
-#         self._itemName = itemName
-#         #self._icon = "mdi:map"
-#         self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
-#         self._unique_id = f"minvw-{self._vehicle['vin']}-{self._itemName}"
-#         self._device_class = device_class
-#         self._connectedcarsclient = connectedcarsclient
-#         self._is_on = None
-
-#     @property
-#     def device_info(self):
-#         _LOGGER.debug(f"device_info (BinaryEntity)")
-
-#         return {
-#             "identifiers": {
-#                 # Serial numbers are unique identifiers within a specific domain
-#                 (DOMAIN, self._vehicle['vin'])
-#             },
-#             "name": self._vehicle['name'],
-#             "manufacturer": self._vehicle['make'],
-#             "model": self._vehicle['model'],
-#             "sw_version": self._vehicle['licensePlate'],
-#             #"via_device": (hue.DOMAIN, self.api.bridgeid),
-#         }
-
-#     @property
-#     def name(self):
-#         """Return the name of the sensor."""
-#         return self._name
-
-#     # @property
-#     # def icon(self):
-#     #     return self._icon
-
-#     @property
-#     def unique_id(self):
-#         """The unique id of the sensor."""
-#         _LOGGER.debug(f"Setting unique_id: {self._unique_id}")
-#         return self._unique_id
-
-#     @property
-#     def is_on(self):
-#         return self._is_on
-
-#     @property
-#     def available(self):
-#         return (self._is_on is not None)
-
-#     @property
-#     def device_class(self):
-#         return self._device_class
-
-#     async def async_update(self):
-#         self._is_on = None
-#         try:
-#             if self._itemName == "IgnitionY":
-#                 self._is_on = str(await self._connectedcarsclient._get_value(self._vehicle['id'], ["ignition", "on"])).lower() == "true"
-#         except Exception as err:
-#             _LOGGER.debug(f"Unable to get binary state: {err}")
-
-
-# class CcTrackerEntity(TrackerEntity):
-#     """Representation of a Device TrackerEntity."""
-
-#     def __init__(self, vehicle, itemName, connectedcarsclient):
-#         self._vehicle = vehicle
-#         self._itemName = itemName
-#         self._icon = "mdi:map"
-#         self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
-#         self._unique_id = f"minvw-{self._vehicle['vin']}-{self._itemName}"
-#         self._device_class = None
-#         self._connectedcarsclient = connectedcarsclient
-#         self._latitude = None
-#         self._longitude = None
-
-#     @property
-#     def device_info(self):
-#         _LOGGER.debug(f"device_info (TrackerEntity)")
-
-#         return {
-#             "identifiers": {
-#                 # Serial numbers are unique identifiers within a specific domain
-#                 (DOMAIN, self._vehicle['vin'])
-#             },
-#             "name": self._vehicle['name'],
-#             "manufacturer": self._vehicle['make'],
-#             "model": self._vehicle['model'],
-#             "sw_version": self._vehicle['licensePlate'],
-#             #"via_device": (hue.DOMAIN, self.api.bridgeid),
-#         }
-
-#     @property
-#     def name(self):
-#         """Return the name of the sensor."""
-#         return self._name
-
-#     @property
-#     def icon(self):
-#         return self._icon
-
-#     @property
-#     def unique_id(self):
-#         """The unique id of the sensor."""
-#         _LOGGER.debug(f"Setting unique_id: {self._unique_id}")
-#         return self._unique_id
-
-#     @property
-#     def source_type(self) -> str:
-#         return "gps"
-
-#     @property
-#     def location_accuracy(self) -> int:
-#         return 1
-
-#     @property
-#     def latitude(self):
-#         return self._latitude
-
-#     @property
-#     def longitude(self):
-#         return self._longitude
-
-#     @property
-#     def available(self):
-#         return (self._latitude is not None and self._longitude is not None)
-
-#     # @property
-#     # def state(self):
-#     #     # State with location coordinates seems necessary to have it appear on the main map
-#     #     return f"{self._latitude}, {self._longitude}"
-
-#     @property
-#     def extra_state_attributes(self):
-#         attributes = dict()
-#         attributes['device_class'] = self._device_class
-#         return attributes
-
-#     async def async_update(self):
-#         self._latitude = None
-#         self._longitude = None
-#         try:
-#             self._latitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "latitude"])
-#             self._longitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "longitude"])
-#         except Exception as err:
-#             _LOGGER.debug(f"Unable to get vehicle location: {err}")
 
 
 class MinVwEntity(Entity):
     """Representation of a Sensor."""
 
-    def __init__(self, vehicle, id, vin, make, model, devicename, itemName, connectedcarsclient):
+    def __init__(self, vehicle, itemName, entity_registry_enabled_default, connectedcarsclient):
         """Initialize the sensor."""
         self._state = None
         self._data_date = None
         self._unit = None
         self._vehicle = vehicle
-        #self._id = id
-        #self._vin = vin
-        #self._make = make
-        #self._model = model
-        #self._devicename = devicename
         self._itemName = itemName
         self._icon = "mdi:car"
-#        self._sensor_value = f"{sensor_type}-{sensor_point}"
-        self._name = f"{make} {model} {self._itemName}"
+        self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
         self._unique_id = f"minvw-{self._vehicle['vin']}-{self._itemName}"
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
-        self._data1 = None
-        self._data2 = None
+        self._entity_registry_enabled_default = entity_registry_enabled_default
         
-#        self._state_class = "measurement"
-#        self._last_reset = None
-        # if sensor_type == "energy":
-        #     self._unit = "kWh"
-        #     self._icon = "mdi:flash-circle"
-        #     self._device_class = "energy"
-        #     if sensor_point == 'end':
-        #         self._state_class = "total_increasing"
-        # elif sensor_type == "water":
-        #     self._unit = "m³"
-        #     self._icon = "mdi:water"
-        #     #self._device_class = "volume"
-        # else:
-        #     self._unit = TEMP_CELSIUS
-        #     self._icon = "mdi:thermometer"
-        #     self._device_class = "temperature"
         if self._itemName == "outdoorTemperature":
             self._unit = TEMP_CELSIUS
             self._icon = "mdi:thermometer"
@@ -270,18 +105,26 @@ class MinVwEntity(Entity):
             self._unit = LENGTH_KILOMETERS
             self._icon = "mdi:counter"
             #self._device_class = DEVICE_CLASS_VOLTAGE
-        elif self._itemName == "Geocoded Location":
+        elif self._itemName == "NextServicePredicted":
             #self._unit = ATTR_LOCATION
-            self._icon = "mdi:map"
-            #self._device_class = DEVICE_CLASS_VOLTAGE
+            self._icon = "mdi:wrench"
+            self._device_class = "date"  # DEVICE_CLASS_DATE
+        elif self._itemName == "EVchargePercentage":
+            self._unit = PERCENTAGE
+            self._icon = "mdi:battery"
+            self._device_class = DEVICE_CLASS_BATTERY
+        elif self._itemName == "EVHVBattTemp":
+            self._unit = TEMP_CELSIUS
+            self._icon = "mdi:thermometer"
+            self._device_class = DEVICE_CLASS_TEMPERATURE
 
 
+
+        _LOGGER.debug(f"Adding sensor: {self._unique_id}")
 
 
     @property
     def device_info(self):
-        _LOGGER.debug(f"device_info (MinVwEntity)")
-
         return {
             "identifiers": {
                 # Serial numbers are unique identifiers within a specific domain
@@ -300,13 +143,16 @@ class MinVwEntity(Entity):
         return self._name
 
     @property
+    def entity_registry_enabled_default(self):
+        return self._entity_registry_enabled_default
+
+    @property
     def icon(self):
         return self._icon
 
     @property
     def unique_id(self):
         """The unique id of the sensor."""
-        _LOGGER.debug(f"Setting unique_id: {self._unique_id}")
         return self._unique_id
 
     @property
@@ -324,11 +170,6 @@ class MinVwEntity(Entity):
         attributes = dict()
         #attributes['state_class'] = self._state_class
         attributes['device_class'] = self._device_class
-        if self._itemName == "Geocoded Location":
-            attributes['source_type'] = "gps"
-            attributes['latitude'] = self._data1
-            attributes['longitude'] = self._data2
-
         return attributes
 
     @property
@@ -352,10 +193,22 @@ class MinVwEntity(Entity):
             self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["fuelLevel", "liter"])
         if self._itemName == "odometer":
             self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["odometer", "odometer"])
-        if self._itemName == "Geocoded Location":
-            self._data1 = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "latitude"])
-            self._data2 = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "longitude"])
-            self._state = f"{self._data1}, {self._data2}"
+        if self._itemName == "NextServicePredicted":
+            self._state = await self._connectedcarsclient._get_next_service_data_predicted(self._vehicle['id'])
+
+        # EV
+        if self._itemName == "EVchargePercentage":
+            self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["chargePercentage", "percent"])
+            batlevel = round(self._state / 10)*10
+            if batlevel == 100:
+                self._icon = "mdi:battery"
+            elif batlevel == 0:
+                self._icon = "mdi:battery-outline"
+            else:
+                self._icon = f"mdi:battery-{batlevel}"
+        if self._itemName == "EVHVBattTemp":
+            self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["highVoltageBatteryTemperature", "celsius"])
+
 
 
         #self._data.update()

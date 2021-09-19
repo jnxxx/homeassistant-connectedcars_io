@@ -30,22 +30,66 @@ class MinVW:
         self._lockUpdate = asyncio.Lock()
 
 
+    async def _get_next_service_data_predicted(self, id):
+      """Calculate number of days until next service. Producted."""
+      ret = None
+      date_str = await self._get_value(id, ["service", "predictedDate"])
+
+      if date_str is not None:
+        ret = datetime.strptime(date_str, "%Y-%m-%d").date()
+        #ret = (date - datetime.now().date()).days
+        #if ret < 0:
+        #  ret = 0
+      return(ret)
+
+
+    # async def _get_value(self, id, selector):
+    #   ret = None
+    #   data = await self._get_vehicle_data()
+    #   vehicles = []
+    #   for item in data['data']['viewer']['vehicles']:
+    #       vehicle = item['vehicle']
+    #       if vehicle['id'] == id:
+    #         obj = vehicle
+    #         for sel in selector:
+    #           if sel in obj or (isinstance(obj, list) and sel < len(obj)):
+    #             #print(obj)
+    #             #print(sel)
+    #             obj = obj[sel]
+    #           else:
+    #             # Object does not have specified selector(s)
+    #             obj = None
+    #             break
+    #         ret = obj
+    #   return(ret)
 
     async def _get_value(self, id, selector):
+      """Find vehicle."""
       ret = None
       data = await self._get_vehicle_data()
       vehicles = []
       for item in data['data']['viewer']['vehicles']:
           vehicle = item['vehicle']
           if vehicle['id'] == id:
-            obj = vehicle
-            for sel in selector:
-              #print(obj)
-              #print(sel)
-              obj = obj[sel]
-            ret = obj
-            #ret = vehicle['outdoorTemperatures'][0]['celsius']
+            ret = self._get_vehicle_value(vehicle, selector)
       return(ret)
+
+    def _get_vehicle_value(self, vehicle, selector):
+      """Get selected attribures in vehicle data."""
+      ret = None
+      obj = vehicle
+      for sel in selector:
+        if sel in obj or (isinstance(obj, list) and sel < len(obj)):
+          #print(obj)
+          #print(sel)
+          obj = obj[sel]
+        else:
+          # Object does not have specified selector(s)
+          obj = None
+          break
+      ret = obj
+      return(ret)
+
 
     async def _get_lampstatus(self, id, type):
       """Get status of warning lamps."""
@@ -73,17 +117,47 @@ class MinVW:
       return(ret)
 
     async def _get_vehicle_instances(self):
-
+      """Get vehicle instances and sensor data available."""
       data = await self._get_vehicle_data()
       vehicles = []
       for item in data['data']['viewer']['vehicles']:
           vehicle = item['vehicle']
+          id = vehicle['id']
 
+          # Find lamps for this vehicle
           lampstates = []
           for lamp in vehicle['lampStates']:
             lampstates.append(lamp['type'])
 
-          vehicles.append( { "id": vehicle['id'], "vin": vehicle['vin'], "name": vehicle['name'], "make": vehicle['make'], "model": vehicle['model'], "licensePlate": vehicle['licensePlate'], "lampStates": lampstates } )
+          # Find data availability for sensors
+          has = []
+          if self._get_vehicle_value(vehicle, ["outdoorTemperatures", 0, "celsius"]) is not None:
+            has.append("outdoorTemperature")
+          if self._get_vehicle_value(vehicle, ["latestBatteryVoltage", "voltage"]) is not None:
+            has.append("BatteryVoltage")
+          if self._get_vehicle_value(vehicle, ["fuelPercentage", "percent"]) is not None:
+            has.append("fuelPercentage")
+          if self._get_vehicle_value(vehicle, ["fuelLevel", "liter"]) is not None:
+            has.append("fuelLevel")
+          if self._get_vehicle_value(vehicle, ["odometer", "odometer"]) is not None:
+            has.append("odometer")
+          if await self._get_next_service_data_predicted(id) is not None:
+            has.append("NextServicePredicted")
+          if self._get_vehicle_value(vehicle, ["chargePercentage", "percent"]) is not None:
+            has.append("EVchargePercentage")
+          if self._get_vehicle_value(vehicle, ["highVoltageBatteryTemperature", "celsius"]) is not None:
+            has.append("EVHVBattTemp")
+
+          if self._get_vehicle_value(vehicle, ["ignition", "on"]) is not None:
+            has.append("Ignition")
+          if self._get_vehicle_value(vehicle, ["health", "ok"]) is not None:
+            has.append("Health")
+          
+          if self._get_vehicle_value(vehicle, ["position", "latitude"]) is not None and self._get_vehicle_value(vehicle, ["position", "longitude"]) is not None:
+            has.append("GeoLocation")
+
+          # Add vehicle to array
+          vehicles.append( { "id": id, "vin": vehicle['vin'], "name": vehicle['name'], "make": vehicle['make'], "model": vehicle['model'], "licensePlate": vehicle['licensePlate'], "lampStates": lampstates, "has": has } )
 
       return(vehicles)
 
@@ -109,7 +183,7 @@ class MinVW:
           odometer
         }
         odometerOffset
-        refuelEvents {
+        refuelEvents(limit: 2) {
           id
           litersAfter
           time
@@ -152,10 +226,6 @@ class MinVW:
             subtitle
           }
         }
-        odometer {
-          time
-          odometer
-        }
         outdoorTemperatures(limit: 1) {
           celsius
           time
@@ -168,10 +238,6 @@ class MinVW:
         }
         service {
           predictedDate
-          nextOilChangeInKmPredictedDate
-          nextOilChangeInDaysPredictedDate
-          nextIntervalServiceInKmPredictedDate
-          nextIntervalServiceInDaysPredictedDate
         }
         latestBatteryVoltage {
           voltage

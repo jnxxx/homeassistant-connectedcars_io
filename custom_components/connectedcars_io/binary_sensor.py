@@ -39,8 +39,10 @@ async def async_setup_entry(
         sensors = []
         data = await _connectedcarsclient._get_vehicle_instances()
         for vehicle in data:
-            sensors.append(CcBinaryEntity(vehicle, "Ignition", "", "moving", True, _connectedcarsclient))
-            sensors.append(CcBinaryEntity(vehicle, "Health", "", "problem", True, _connectedcarsclient))            
+            if "Ignition" in vehicle["has"]:
+                sensors.append(CcBinaryEntity(vehicle, "Ignition", "", "moving", True, _connectedcarsclient))
+            if "Health" in vehicle["has"]:
+                sensors.append(CcBinaryEntity(vehicle, "Health", "", "problem", True, _connectedcarsclient))            
             for lampState in vehicle['lampStates']:
                 sensors.append(CcBinaryEntity(vehicle, "Lamp", lampState, "problem", False, _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
@@ -63,11 +65,11 @@ class CcBinaryEntity(BinarySensorEntity):
         self._connectedcarsclient = connectedcarsclient
         self._is_on = None
         self._entity_registry_enabled_default = entity_registry_enabled_default
+        _LOGGER.debug(f"Adding sensor: {self._unique_id}")
+        
 
     @property
     def device_info(self):
-        _LOGGER.debug(f"device_info (BinaryEntity)")
-
         return {
             "identifiers": {
                 (DOMAIN, self._vehicle['vin'])
@@ -103,7 +105,6 @@ class CcBinaryEntity(BinarySensorEntity):
     @property
     def unique_id(self):
         """The unique id of the sensor."""
-        _LOGGER.debug(f"Setting unique_id: {self._unique_id}")
         return self._unique_id
 
     @property

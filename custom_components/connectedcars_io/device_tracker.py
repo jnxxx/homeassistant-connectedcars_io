@@ -41,7 +41,8 @@ async def async_setup_entry(
         sensors = []
         data = await _connectedcarsclient._get_vehicle_instances()
         for vehicle in data:
-            sensors.append(CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient))
+            if "GeoLocation" in vehicle["has"]:
+                sensors.append(CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
 
     except Exception:
@@ -61,11 +62,11 @@ class CcTrackerEntity(TrackerEntity):
         self._connectedcarsclient = connectedcarsclient
         self._latitude = None
         self._longitude = None
+        _LOGGER.debug(f"Adding sensor: {self._unique_id}")
+
 
     @property
     def device_info(self):
-        _LOGGER.debug(f"device_info (TrackerEntity)")
-
         return {
             "identifiers": {
                 # Serial numbers are unique identifiers within a specific domain
@@ -90,7 +91,6 @@ class CcTrackerEntity(TrackerEntity):
     @property
     def unique_id(self):
         """The unique id of the sensor."""
-        _LOGGER.debug(f"Setting unique_id: {self._unique_id}")
         return self._unique_id
 
     @property
@@ -149,8 +149,6 @@ class CcTrackerEntity(TrackerEntity):
         try:
             self._latitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "latitude"])
             self._longitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "longitude"])
-#            self._latitude = 56.381705776758416
-#            self._longitude = 9.678497968761999
         except Exception as err:
             _LOGGER.debug(f"Unable to get vehicle location: {err}")
 

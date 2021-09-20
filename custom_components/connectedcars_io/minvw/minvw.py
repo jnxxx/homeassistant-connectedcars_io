@@ -211,7 +211,6 @@ class MinVW:
         }
         adblueRemainingKm(limit: 1) {
           km
-          time
         }
         ignition {
           time

@@ -13,7 +13,7 @@
                     "password": "Password",
                     "namespace": "Namespace"
                 },
-                "description": "Enter credentials.<br />If you have another car also using connectedcars.io, change the namespace. For example to minskoda or minseat.",
+                "description": "Enter credentials.<br /><br />Known namespaces: minvolkswagen, minskoda, minseat, mitaudi",
                 "title": "Authentication"
             },
             "repo": {

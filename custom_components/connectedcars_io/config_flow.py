@@ -46,7 +46,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 client = MinVW(user_input[CONF_EMAIL], user_input[CONF_PASSWORD], user_input['namespace'])
                 token = await client._get_access_token()
-                _LOGGER.debug(f"Config response: {token}")
 
             except Exception as err:
                 _LOGGER.debug(err)

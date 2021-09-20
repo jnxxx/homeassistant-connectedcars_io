@@ -40,7 +40,7 @@ If you have multiple cars of different brands, add the integration multiple time
 A device is created for each car.
 For each car the following sensors can be created, but only when data is present. Thus fuel based cars should have fuel level sensors, while EVs should have battery sensors.
 
-Many sensors are created - 14 in total actually.  The naming scheme is `{brand} {model} <name>`.
+The naming scheme is `{brand} {model} <name>`.
 Sensor names:
 * BatteryVoltage (12V battery)
 * EVHVBattTemp (EV, untested)

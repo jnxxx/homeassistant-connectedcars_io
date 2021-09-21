@@ -13,7 +13,7 @@
                     "password": "Password",
                     "namespace": "Namespace"
                 },
-                "description": "Enter credentials.<br /><br />Known namespaces: minvolkswagen, minskoda, minseat, mitaudi",
+                "description": "Enter credentials.\n\nKnown namespaces: minvolkswagen, minskoda, minseat, mitaudi",
                 "title": "Authentication"
             },
             "repo": {

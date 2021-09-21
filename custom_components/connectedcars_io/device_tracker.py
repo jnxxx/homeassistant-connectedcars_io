@@ -16,8 +16,6 @@ import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.exceptions import PlatformNotReady
 from .minvw import MinVW
-#from custom_components.eforsyning.pyeforsyning.eforsyning import Eforsyning
-#from custom_components.eforsyning.pyeforsyning.models import TimeSeries
 
 _LOGGER = logging.getLogger(__name__)
 from .const import DOMAIN

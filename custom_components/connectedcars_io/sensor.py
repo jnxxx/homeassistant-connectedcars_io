@@ -19,8 +19,6 @@ import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.exceptions import PlatformNotReady
 from .minvw import MinVW
-#from custom_components.eforsyning.pyeforsyning.eforsyning import Eforsyning
-#from custom_components.eforsyning.pyeforsyning.models import TimeSeries
 
 _LOGGER = logging.getLogger(__name__)
 from .const import DOMAIN
@@ -210,13 +208,4 @@ class MinVwEntity(Entity):
             self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["highVoltageBatteryTemperature", "celsius"])
 
 
-
-        #self._data.update()
-        #self._data_date = self._data.get_data_date()
-        #self._state = self._data.get_data(self._sensor_value)
-
-        #self._state = self._name
-
-        #_LOGGER.debug(f"Done setting status for {self.name} = {self._state} {self._unit}")
-        #_LOGGER.warning(f"eforsyning update: {self._name}")
 

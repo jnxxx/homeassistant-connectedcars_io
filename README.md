@@ -69,4 +69,16 @@ logger:
 
 ## Examples
 
+Configuration
+![Cinfig](images/config.png)
+
+Device
+![Device](images/device.png)
+
+Dashboard
+![Dashboard](images/dashboard.png)
+
+Location state
+![Location state](images/location_state.png)
+
 

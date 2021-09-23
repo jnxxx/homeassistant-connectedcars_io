@@ -3,7 +3,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
-The `Connectedcars.io (Min Volkswagen)` component is a Home Assistant custom component for showing car information for Danish Volkswagens equipped with the hardware to send data to the mobile app "Min Volkswagen".
+The `Connectedcars.io (Min Volkswagen)` component is a Home Assistant custom component for showing car information for Danish Volkswagens equipped with the hardware to send data to the mobile app "Min Volkswagen". 
 Min Skoda, Min Seat and Mit Audi all use the same backend and should work as well, although still not tested.
 
 ## Installation
@@ -32,15 +32,15 @@ It is configurable through config flow, meaning it will popup a dialog after add
  - mitaudi
 
 #### Multiple cars
-If you have multiple cars on the same account, they should all appear.
-If you have multiple cars of different brands, add the integration multiple times each with the suitable namespace.
+If you have multiple cars on the same account, they should all appear. 
+If you have multiple cars of different brands, add the integration multiple times each with the suitable namespace. 
 *So far only tested with a single car*
 
 ## State and attributes
 A device is created for each car.
-For each car the following sensors can be created, but only when data is present. Thus fuel based cars should have fuel level sensors, while EVs should have battery sensors.
+For each car the following sensors can be created, but only when data is present. Thus fuel based cars should have fuel level sensors, while EVs should have battery sensors. 
 
-The naming scheme is `{brand} {model} <name>`.
+The naming scheme is `{brand} {model} <name>`. 
 Sensor names:
 * BatteryVoltage (12V battery)
 * EVHVBattTemp (EV, untested)

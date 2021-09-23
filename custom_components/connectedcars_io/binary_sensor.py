@@ -60,7 +60,7 @@ class CcBinaryEntity(BinarySensorEntity):
         self._subitemName = subitemName
         #self._icon = "mdi:map"
         self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}{self._subitemName.capitalize()}"
-        self._unique_id = f"minvw-{self._vehicle['vin']}-{self._itemName}{self._subitemName.capitalize()}"
+        self._unique_id = f"{DOMAIN}-{self._vehicle['vin']}-{self._itemName}{self._subitemName.capitalize()}"
         self._device_class = device_class
         self._connectedcarsclient = connectedcarsclient
         self._is_on = None

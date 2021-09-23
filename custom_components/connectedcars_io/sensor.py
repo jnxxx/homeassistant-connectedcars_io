@@ -78,7 +78,7 @@ class MinVwEntity(Entity):
         self._itemName = itemName
         self._icon = "mdi:car"
         self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
-        self._unique_id = f"minvw-{self._vehicle['vin']}-{self._itemName}"
+        self._unique_id = f"{DOMAIN}-{self._vehicle['vin']}-{self._itemName}"
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
         self._entity_registry_enabled_default = entity_registry_enabled_default

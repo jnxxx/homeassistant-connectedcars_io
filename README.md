@@ -70,15 +70,15 @@ logger:
 ## Examples
 
 Configuration  
-![Config](images/config.png)
+![Config](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/config.png)
 
 Device  
-![Device](images/device.png)
+![Device](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/device.png)
 
 Dashboard  
-![Dashboard](images/dashboard.png)
+![Dashboard](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/dashboard.png)
 
 Location state  
-![Location state](images/location_state.png)
+![Location state](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/location_state.png)
 
 

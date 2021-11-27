@@ -14,8 +14,9 @@ Min Skoda, Min Seat and Mit Audi all use the same backend and should work as wel
 
 ### Installation with HACS (Home Assistant Community Store)
   1. Ensure that [HACS](https://hacs.xyz/) is installed.
-  2. Search for and install the `Connectedcars.io (Min Volkswagen)` integration.
-  3. Restart Home Assistant.
+  2. In HACS / Integrations / Kebab menu / Custom repositories, add the url the this repository.
+  3. Search for and install the `Connectedcars.io (Min Volkswagen)` integration.
+  4. Restart Home Assistant.
 
 
 ## Configuration

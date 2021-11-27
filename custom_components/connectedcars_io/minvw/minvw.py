@@ -31,7 +31,7 @@ class MinVW:
 
 
     async def _get_next_service_data_predicted(self, id):
-      """Calculate number of days until next service. Producted."""
+      """Calculate number of days until next service. Prodicted."""
       ret = None
       date_str = await self._get_value(id, ["service", "predictedDate"])
 
@@ -63,6 +63,15 @@ class MinVW:
     #         ret = obj
     #   return(ret)
 
+    async def _get_value_float(self, id, selector):
+      ret = None
+      data = await self._get_value(id, selector)
+      if type(data) == str:
+        ret = float(data)
+      if type(data) == float or type(data) == int:
+        ret = data
+      return(ret)
+
     async def _get_value(self, id, selector):
       """Find vehicle."""
       ret = None
@@ -79,7 +88,7 @@ class MinVW:
       ret = None
       obj = vehicle
       for sel in selector:
-        if sel in obj or (isinstance(obj, list) and sel < len(obj)):
+        if (obj is not None) and (sel in obj or (isinstance(obj, list) and sel < len(obj))):
           #print(obj)
           #print(sel)
           obj = obj[sel]
@@ -266,8 +275,9 @@ class MinVW:
           async with aiohttp.ClientSession() as session:
             async with session.post(req_url, json = req_body, headers = headers) as response:
               self._data = await response.json()
+              #self._data = json.loads('')
               self._data_expires = datetime.utcnow()+timedelta(minutes=1)
-              _LOGGER.debug(f"Got vehicle data: {self._data}")
+              _LOGGER.debug(f"Got vehicle data: {json.dumps(self._data)}")
           
           #result = requests.post(req_url, json = req_body, headers = headers)
           #print(result)

@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
+import traceback
 
 from homeassistant import config_entries, core
 from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS
@@ -47,7 +48,9 @@ async def async_setup_entry(
                 sensors.append(CcBinaryEntity(vehicle, "Lamp", lampState, "problem", False, _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
 
-    except Exception:
+    except Exception as e:
+        _LOGGER.warning(f"Failed to add sensors: {e}")
+        _LOGGER.debug(f"{traceback.format_exc()}")
         raise PlatformNotReady
 
 

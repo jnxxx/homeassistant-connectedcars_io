@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
+import traceback
 
 from homeassistant import config_entries, core
 from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS, STATE_HOME, STATE_NOT_HOME
@@ -43,7 +44,9 @@ async def async_setup_entry(
                 sensors.append(CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
 
-    except Exception:
+    except Exception as e:
+        _LOGGER.warning(f"Failed to add sensors: {e}")
+        _LOGGER.debug(f"{traceback.format_exc()}")
         raise PlatformNotReady
 
 
@@ -145,8 +148,8 @@ class CcTrackerEntity(TrackerEntity):
         self._latitude = None
         self._longitude = None
         try:
-            self._latitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "latitude"])
-            self._longitude = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "longitude"])
+            self._latitude = await self._connectedcarsclient._get_value_float(self._vehicle['id'], ["position", "latitude"])
+            self._longitude = await self._connectedcarsclient._get_value_float(self._vehicle['id'], ["position", "longitude"])
         except Exception as err:
             _LOGGER.debug(f"Unable to get vehicle location: {err}")
 

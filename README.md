@@ -55,7 +55,7 @@ Sensor names:
 * NextServicePredicted (disabled by default)
 * odometer
 * outdoorTemperature
-
+* Speed
 
 
 ## Debugging

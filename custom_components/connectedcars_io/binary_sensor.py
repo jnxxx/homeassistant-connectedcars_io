@@ -22,7 +22,7 @@ from .minvw import MinVW
 _LOGGER = logging.getLogger(__name__)
 from .const import DOMAIN
 
-SCAN_INTERVAL = timedelta(minutes=5)
+SCAN_INTERVAL = timedelta(minutes=1)
 
 _connectedcarsclient = None
 

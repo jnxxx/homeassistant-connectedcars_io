@@ -21,7 +21,7 @@ from .minvw import MinVW
 _LOGGER = logging.getLogger(__name__)
 from .const import DOMAIN
 
-SCAN_INTERVAL = timedelta(minutes=5)
+SCAN_INTERVAL = timedelta(minutes=1)
 
 _connectedcarsclient = None
 
@@ -115,6 +115,10 @@ class CcTrackerEntity(TrackerEntity):
         return (self._latitude is not None and self._longitude is not None)
 
     @property
+    def device_class(self):
+        return self._device_class
+
+    @property
     def should_poll(self) -> bool:
         """No polling for entities that have location pushed."""
         return True
@@ -141,7 +145,7 @@ class CcTrackerEntity(TrackerEntity):
     @property
     def extra_state_attributes(self):
         attributes = dict()
-        attributes['device_class'] = self._device_class
+        #attributes['device_class'] = self._device_class
         return attributes
 
     async def async_update(self):

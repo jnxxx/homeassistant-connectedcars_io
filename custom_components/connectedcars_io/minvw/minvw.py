@@ -164,6 +164,8 @@ class MinVW:
           
           if self._get_vehicle_value(vehicle, ["position", "latitude"]) is not None and self._get_vehicle_value(vehicle, ["position", "longitude"]) is not None:
             has.append("GeoLocation")
+          if self._get_vehicle_value(vehicle, ["position", "speed"]) is not None:
+            has.append("Speed")
 
           # Add vehicle to array
           vehicles.append( { "id": id, "vin": vehicle['vin'], "name": vehicle['name'], "make": vehicle['make'], "model": vehicle['model'], "licensePlate": vehicle['licensePlate'], "lampStates": lampstates, "has": has } )
@@ -276,9 +278,21 @@ class MinVW:
             async with session.post(req_url, json = req_body, headers = headers) as response:
               self._data = await response.json()
               #self._data = json.loads('')
-              self._data_expires = datetime.utcnow()+timedelta(minutes=1)
               _LOGGER.debug(f"Got vehicle data: {json.dumps(self._data)}")
-          
+              
+              # Does any car have ignition?
+              expire_time = 4.75
+              for item in self._data['data']['viewer']['vehicles']:
+                vehicle = item['vehicle']
+                id = vehicle['id']
+                ignition = self._get_vehicle_value(vehicle, ["ignition", "on"])     # Preferred to check this only, but it seems to be delayed
+                speed = self._get_vehicle_value(vehicle, ["position", "speed"])
+                speed = speed if speed is not None else 0
+                if ignition == True or speed > 0:
+                  expire_time = 0.75  # At least one car has ignition/moving
+                  break
+              self._data_expires = datetime.utcnow()+timedelta(minutes=expire_time)
+
           #result = requests.post(req_url, json = req_body, headers = headers)
           #print(result)
           #result_json = result.json()

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional
 import traceback
 
 from homeassistant import config_entries, core
-from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS, DEVICE_CLASS_BATTERY, DEVICE_CLASS_TEMPERATURE
+from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS, DEVICE_CLASS_BATTERY, DEVICE_CLASS_TEMPERATURE, SPEED_KILOMETERS_PER_HOUR
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.components.device_tracker.config_entry import TrackerEntity
@@ -24,7 +24,7 @@ from .minvw import MinVW
 _LOGGER = logging.getLogger(__name__)
 from .const import DOMAIN
 
-SCAN_INTERVAL = timedelta(minutes=5)
+SCAN_INTERVAL = timedelta(minutes=1)
 
 _connectedcarsclient = None
 
@@ -59,6 +59,8 @@ async def async_setup_entry(
                 sensors.append(MinVwEntity(vehicle, "EVchargePercentage", True, _connectedcarsclient))
             if "EVHVBattTemp" in vehicle["has"]:
                 sensors.append(MinVwEntity(vehicle, "EVHVBattTemp", True, _connectedcarsclient))
+            if "Speed" in vehicle["has"]:
+                sensors.append(MinVwEntity(vehicle, "Speed", True, _connectedcarsclient))
         async_add_entities(sensors, update_before_add=True)
 
     except Exception as e:
@@ -84,6 +86,7 @@ class MinVwEntity(Entity):
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
         self._entity_registry_enabled_default = entity_registry_enabled_default
+        self._dict = dict()
         
         if self._itemName == "outdoorTemperature":
             self._unit = TEMP_CELSIUS
@@ -117,7 +120,10 @@ class MinVwEntity(Entity):
             self._unit = TEMP_CELSIUS
             self._icon = "mdi:thermometer"
             self._device_class = DEVICE_CLASS_TEMPERATURE
-
+        elif self._itemName == "Speed":
+            self._unit = SPEED_KILOMETERS_PER_HOUR
+            self._icon = "mdi:speedometer"
+#            self._device_class = SPEED
 
 
         _LOGGER.debug(f"Adding sensor: {self._unique_id}")
@@ -165,11 +171,18 @@ class MinVwEntity(Entity):
         return (self._state is not None)
 
     @property
+    def device_class(self):
+        return self._device_class
+
+    @property
     def extra_state_attributes(self):
         """Return state attributes."""
         attributes = dict()
         #attributes['state_class'] = self._state_class
-        attributes['device_class'] = self._device_class
+#        if self._device_class is not None:
+#            attributes['device_class'] = self._device_class
+        for key in self._dict:
+            attributes[key] = self._dict[key]
         return attributes
 
     @property
@@ -195,6 +208,11 @@ class MinVwEntity(Entity):
             self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["odometer", "odometer"])
         if self._itemName == "NextServicePredicted":
             self._state = await self._connectedcarsclient._get_next_service_data_predicted(self._vehicle['id'])
+        if self._itemName == "Speed":
+            self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "speed"])
+            self._dict["Direction"] = await self._connectedcarsclient._get_value(self._vehicle['id'], ["position", "direction"])
+            direction = self._dict["Direction"]
+            #_LOGGER.debug(f"Speed: {self._state} km/h, direction: {direction}")
 
         # EV
         if self._itemName == "EVchargePercentage":
@@ -208,6 +226,4 @@ class MinVwEntity(Entity):
                 self._icon = f"mdi:battery-{batlevel}"
         if self._itemName == "EVHVBattTemp":
             self._state = await self._connectedcarsclient._get_value(self._vehicle['id'], ["highVoltageBatteryTemperature", "celsius"])
-
-
 

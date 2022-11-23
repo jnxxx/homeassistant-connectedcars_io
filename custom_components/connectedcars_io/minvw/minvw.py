@@ -223,6 +223,14 @@ class MinVW:
         adblueRemainingKm(limit: 1) {
           km
         }
+        chargePercentage {
+          percent
+          time
+        }
+        highVoltageBatteryTemperature {
+          celsius
+          time
+        }
         ignition {
           time
           on

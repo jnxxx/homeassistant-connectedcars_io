@@ -1,53 +1,44 @@
+"""Support for connectedcars.io / Min Volkswagen integration."""
+
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Optional
+from datetime import timedelta
 import traceback
 
 from homeassistant import config_entries, core
-from homeassistant.const import TEMP_CELSIUS, ELECTRIC_POTENTIAL_VOLT, DEVICE_CLASS_VOLTAGE, DEVICE_CLASS_TEMPERATURE, VOLUME_LITERS, PERCENTAGE, LENGTH_KILOMETERS, STATE_HOME, STATE_NOT_HOME
-import homeassistant.helpers.config_validation as cv
 from homeassistant.components.device_tracker.config_entry import TrackerEntity
-from homeassistant.components import zone
-from homeassistant.helpers.typing import (
-    ConfigType,
-    DiscoveryInfoType,
-    HomeAssistantType,
-)
-import voluptuous as vol
-from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.exceptions import PlatformNotReady
-from .minvw import MinVW
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
-from .const import DOMAIN
 
 SCAN_INTERVAL = timedelta(minutes=1)
 
-_connectedcarsclient = None
 
 async def async_setup_entry(
     hass: core.HomeAssistant,
     config_entry: config_entries.ConfigEntry,
     async_add_entities,
 ):
+    """Set up the Connectedcars_io device_tracker platform."""
     config = hass.data[DOMAIN][config_entry.entry_id]
-    #_LOGGER.debug(f"Config: {config}")
 
     _connectedcarsclient = config["connectedcarsclient"]
-    #_connectedcarsclient = MinVW(config["email"], config["password"], config["namespace"])
 
     try:
         sensors = []
-        data = await _connectedcarsclient._get_vehicle_instances()
+        data = await _connectedcarsclient.get_vehicle_instances()
         for vehicle in data:
             if "GeoLocation" in vehicle["has"]:
-                sensors.append(CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient))
+                sensors.append(
+                    CcTrackerEntity(vehicle, "GeoLocation", _connectedcarsclient)
+                )
         async_add_entities(sensors, update_before_add=True)
 
-    except Exception as e:
-        _LOGGER.warning(f"Failed to add sensors: {e}")
-        _LOGGER.debug(f"{traceback.format_exc()}")
-        raise PlatformNotReady
+    except Exception as err:
+        _LOGGER.warning("Failed to add sensors: %s", err)
+        _LOGGER.debug("%s", traceback.format_exc())
+        raise PlatformNotReady from err
 
 
 class CcTrackerEntity(TrackerEntity):
@@ -57,27 +48,29 @@ class CcTrackerEntity(TrackerEntity):
         self._vehicle = vehicle
         self._itemName = itemName
         self._icon = "mdi:map"
-        self._name = f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
+        self._name = (
+            f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
+        )
         self._unique_id = f"{DOMAIN}-{self._vehicle['vin']}-{self._itemName}"
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
         self._latitude = None
         self._longitude = None
-        _LOGGER.debug(f"Adding sensor: {self._unique_id}")
-
+        self._cached_location = None
+        _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
     @property
     def device_info(self):
         return {
             "identifiers": {
                 # Serial numbers are unique identifiers within a specific domain
-                (DOMAIN, self._vehicle['vin'])
+                (DOMAIN, self._vehicle["vin"])
             },
-            "name": self._vehicle['name'],
-            "manufacturer": self._vehicle['make'],
-            "model": self._vehicle['model'],
-            "sw_version": self._vehicle['licensePlate'],
-            #"via_device": (hue.DOMAIN, self.api.bridgeid),
+            "name": self._vehicle["name"],
+            "manufacturer": self._vehicle["make"],
+            "model": self._vehicle["model"],
+            "sw_version": self._vehicle["licensePlate"],
+            # "via_device": (hue.DOMAIN, self.api.bridgeid),
         }
 
     @property
@@ -112,7 +105,7 @@ class CcTrackerEntity(TrackerEntity):
 
     @property
     def available(self):
-        return (self._latitude is not None and self._longitude is not None)
+        return self._latitude is not None and self._longitude is not None
 
     @property
     def device_class(self):
@@ -145,16 +138,44 @@ class CcTrackerEntity(TrackerEntity):
     @property
     def extra_state_attributes(self):
         attributes = dict()
-        #attributes['device_class'] = self._device_class
+        # attributes['device_class'] = self._device_class
         return attributes
 
     async def async_update(self):
+        """Update data."""
         self._latitude = None
         self._longitude = None
         try:
-            self._latitude = await self._connectedcarsclient._get_value_float(self._vehicle['id'], ["position", "latitude"])
-            self._longitude = await self._connectedcarsclient._get_value_float(self._vehicle['id'], ["position", "longitude"])
-        except Exception as err:
-            _LOGGER.debug(f"Unable to get vehicle location: {err}")
+            ignition = (
+                str(
+                    await self._connectedcarsclient.get_value(
+                        self._vehicle["id"], ["ignition", "on"]
+                    )
+                ).lower()
+                == "true"
+            )
+            _LOGGER.debug("ignition: %s", ignition)
 
+            latitude = await self._connectedcarsclient.get_value_float(
+                self._vehicle["id"], ["position", "latitude"]
+            )
+            longitude = await self._connectedcarsclient.get_value_float(
+                self._vehicle["id"], ["position", "longitude"]
+            )
+            position = tuple((latitude, longitude))
 
+            if ignition:
+                self._cached_location = None
+            else:
+                if self._cached_location is None:
+                    self._cached_location = position
+                    _LOGGER.debug("position: %s", position)
+                else:
+                    position = self._cached_location
+                    _LOGGER.debug("cached_location: %s", position)
+
+            self._latitude = position[0]
+            self._longitude = position[1]
+
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Unable to get vehicle location: %s", err)

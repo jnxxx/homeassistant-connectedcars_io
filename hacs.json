@@ -1,6 +1,7 @@
 {
   "name": "Connectedcars.io (Min Volkswagen)",
   "render_readme": true,
-  "country": ["DK"]
+  "country": ["DK"],
+  "zip_release": true,
+  "filename": "connectedcars_io.zip"
 }
-

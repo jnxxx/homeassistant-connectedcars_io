@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.helpers.entity import Entity
 from homeassistant.exceptions import PlatformNotReady
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
 
@@ -88,6 +89,21 @@ async def async_setup_entry(
         _LOGGER.warning("Failed to add sensors: %s", err)
         _LOGGER.debug("%s", traceback.format_exc())
         raise PlatformNotReady from err
+
+    # Build array with devices to keep
+    devices = []
+    for vehicle in data:
+        devices.append((DOMAIN, vehicle["vin"]))
+
+    # Remove devices no longer reported
+    device_registry = dr.async_get(hass)
+    for device_entry in dr.async_entries_for_config_entry(
+        device_registry, config_entry.entry_id
+    ):
+        for identifier in device_entry.identifiers:
+            if identifier not in devices:
+                _LOGGER.warning("Removing device: %s", identifier)
+                device_registry.async_remove_device(device_entry.id)
 
 
 class MinVwEntity(Entity):

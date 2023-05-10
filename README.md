@@ -44,8 +44,8 @@ For each car the following sensors can be created, but only when data is present
 The naming scheme is `{brand} {model} <name>`.  
 Sensor names:
 * BatteryVoltage (12V battery)
-* EVHVBattTemp (EV, untested)
-* EVchargePercentage (EV, untested)
+* EVHVBattTemp (EV)
+* EVchargePercentage (EV)
 * fuelLevel
 * fuelPercentage
 * GeoLocation

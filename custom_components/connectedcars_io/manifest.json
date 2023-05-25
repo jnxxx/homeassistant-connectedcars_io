@@ -1,7 +1,9 @@
 {
   "domain": "connectedcars_io",
   "name": "Connectedcars.io (Min Volkswagen)",
-  "codeowners": ["@jnxxx"],
+  "codeowners": [
+    "@jnxxx"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/jnxxx/homeassistant-connectedcars_io/",
@@ -11,6 +13,6 @@
   "issue_tracker": "https://github.com/jnxxx/homeassistant-connectedcars_io/issues",
   "requirements": [],
   "ssdp": [],
-  "version": "1.0.1",
+  "version": "1.0.2",
   "zeroconf": []
 }

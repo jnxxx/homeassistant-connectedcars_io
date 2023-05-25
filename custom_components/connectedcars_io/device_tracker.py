@@ -1,7 +1,7 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 import traceback
 
 from homeassistant import config_entries, core
@@ -57,6 +57,7 @@ class CcTrackerEntity(TrackerEntity):
         self._latitude = None
         self._longitude = None
         self._cached_location = None
+        self._cached_time = None
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
     @property
@@ -154,7 +155,17 @@ class CcTrackerEntity(TrackerEntity):
                 ).lower()
                 == "true"
             )
-            _LOGGER.debug("ignition: %s", ignition)
+            try:
+                ignition_time = datetime.fromisoformat(
+                    str(
+                        await self._connectedcarsclient.get_value(
+                            self._vehicle["id"], ["ignition", "time"]
+                        )
+                    ).replace("Z", "+00:00")
+                )
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Unable to parse ignition timestamp. Err: %s", err)
+            _LOGGER.debug("ignition: %s, time: %s", ignition, ignition_time)
 
             latitude = await self._connectedcarsclient.get_value_float(
                 self._vehicle["id"], ["position", "latitude"]
@@ -166,9 +177,11 @@ class CcTrackerEntity(TrackerEntity):
 
             if ignition:
                 self._cached_location = None
+                self._cached_time = None
             else:
-                if self._cached_location is None:
+                if self._cached_location is None or ignition_time > self._cached_time:
                     self._cached_location = position
+                    self._cached_time = ignition_time
                     _LOGGER.debug("position: %s", position)
                 else:
                     position = self._cached_location

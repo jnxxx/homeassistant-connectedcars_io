@@ -67,11 +67,15 @@ class CcTrackerEntity(TrackerEntity):
                 # Serial numbers are unique identifiers within a specific domain
                 (DOMAIN, self._vehicle["vin"])
             },
-            "name": self._vehicle["name"],
+            "name": f"{self._vehicle['make']} {self._vehicle['model']}",  # self._vehicle["name"],
             "manufacturer": self._vehicle["make"],
-            "model": self._vehicle["model"],
+            "model": self._vehicle["name"]
+            .removeprefix("VW")
+            .removeprefix("Skoda")
+            .removeprefix("Seat")
+            .removeprefix("Audi")
+            .strip(),
             "sw_version": self._vehicle["licensePlate"],
-            # "via_device": (hue.DOMAIN, self.api.bridgeid),
         }
 
     @property

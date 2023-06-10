@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import json
 import asyncio
 import aiohttp
@@ -44,25 +45,146 @@ class MinVW:
             #  ret = 0
         return ret
 
-    # async def get_value(self, id, selector):
-    #   ret = None
-    #   data = await self._get_vehicle_data()
-    #   vehicles = []
-    #   for item in data['data']['viewer']['vehicles']:
-    #       vehicle = item['vehicle']
-    #       if vehicle['id'] == id:
-    #         obj = vehicle
-    #         for sel in selector:
-    #           if sel in obj or (isinstance(obj, list) and sel < len(obj)):
-    #             #print(obj)
-    #             #print(sel)
-    #             obj = obj[sel]
-    #           else:
-    #             # Object does not have specified selector(s)
-    #             obj = None
-    #             break
-    #         ret = obj
-    #   return(ret)
+    async def api_request(self, req_param):
+        """Make an API request for data"""
+        ret = None
+
+        req_body = {"query": req_param}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "x-organization-namespace": f"semler:{self._namespace}",
+            "User-Agent": "ConnectedCars/360 CFNetwork/978.0.7 Darwin/18.7.0",
+            "Authorization": f"Bearer {await self._get_access_token()}",
+        }
+
+        req_url = self._base_url_graph + "graphql"
+
+        async with self._lock_update:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    req_url, json=req_body, headers=headers
+                ) as response:
+                    ret = await response.json()
+
+        return ret
+
+    async def get_latest_years_mileage(self, vehicle_id, latest_month):
+        """Get mileage for latest year or month."""
+        ret = None
+        att = dict()
+
+        req_param = """query YearlyMileage {
+  vehicle(id: %s) {
+
+    totalTripStatistics(period: {first: "%sZ", last: "%sZ"} ) {mileageInKm driveDurationInMinutes numberTrips longestMileageInKm}
+  }
+}
+        """
+
+        date = datetime.utcnow()
+        time_delta = relativedelta(years=-1)
+        if latest_month:
+            time_delta = relativedelta(months=-1)
+
+        req_param = req_param % (
+            vehicle_id,
+            (date + time_delta).isoformat(timespec="milliseconds"),
+            date.isoformat(timespec="milliseconds"),
+        )
+
+        vehicle_data = await self.api_request(req_param)
+        ret = self._get_vehicle_value(
+            vehicle_data, ["data", "vehicle", "totalTripStatistics", "mileageInKm"]
+        )
+        if ret is not None:
+            ret = round(ret, 1)
+
+        value = self._get_vehicle_value(
+            vehicle_data,
+            ["data", "vehicle", "totalTripStatistics", "driveDurationInMinutes"],
+        )
+        if value is not None:
+            value = round(value)
+        att["Duration in minutes"] = value
+
+        att["Trips"] = self._get_vehicle_value(
+            vehicle_data, ["data", "vehicle", "totalTripStatistics", "numberTrips"]
+        )
+
+        value = self._get_vehicle_value(
+            vehicle_data,
+            ["data", "vehicle", "totalTripStatistics", "longestMileageInKm"],
+        )
+        if value is not None:
+            value = round(value, 1)
+        att["Longest trip in km"] = value
+
+        return ret, att
+
+    async def get_fuel_economy(self, vehicle_id):
+        """Calculate distance driven per liter of fuel."""
+        ret = None
+        att = dict()
+
+        req_param = """query fuel {
+  vehicle(id: %s) {
+    refuelEvents(limit: 2, order: DESC) {
+      litersAfter
+      litersBefore
+      time
+    }
+    fuelLevel {
+      time
+      liter
+    }
+  }
+}
+        """
+        req_param = req_param % (vehicle_id)
+
+        vehicle_data = await self.api_request(req_param)
+
+        fuelevents = self._get_vehicle_value(
+            vehicle_data, ["data", "vehicle", "refuelEvents"]
+        )
+        fuellevel = self._get_vehicle_value(
+            vehicle_data, ["data", "vehicle", "fuelLevel"]
+        )
+
+        if fuelevents is not None and len(fuelevents) >= 2 and fuellevel is not None:
+
+            fuel_used = 0
+            fuel_used += fuelevents[1]["litersAfter"] - fuelevents[0]["litersBefore"]
+            fuel_used += fuelevents[0]["litersAfter"] - fuellevel["liter"]
+            att["Fuel used"] = fuel_used
+
+            # Request distance
+            time_start = fuelevents[1]["time"]
+            time_end = fuellevel["time"]
+
+            req_param = """query fuelDistance {
+  vehicle(id: %s) {
+    totalTripStatistics(period: {first: "%s", last: "%s"} ) { mileageInKm }
+  }
+}
+            """
+            req_param = req_param % (
+                vehicle_id,
+                time_start,
+                time_end,
+            )
+
+            vehicle_data = await self.api_request(req_param)
+            distance = self._get_vehicle_value(
+                vehicle_data, ["data", "vehicle", "totalTripStatistics", "mileageInKm"]
+            )
+
+            if distance is not None:
+                att["distance"] = distance
+                ret = round(distance / fuel_used, 1)
+
+        return ret, att
 
     async def get_value_float(self, vehicle_id, selector):
         """Extract a float value from read data"""

@@ -1,24 +1,28 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 import traceback
 
 from homeassistant import config_entries, core
 from homeassistant.const import (
-    TEMP_CELSIUS,
-    ELECTRIC_POTENTIAL_VOLT,
-    DEVICE_CLASS_VOLTAGE,
-    DEVICE_CLASS_TEMPERATURE,
-    VOLUME_LITERS,
+    UnitOfTemperature,
+    UnitOfElectricPotential,
+    UnitOfVolume,
     PERCENTAGE,
-    LENGTH_KILOMETERS,
-    DEVICE_CLASS_BATTERY,
-    SPEED_KILOMETERS_PER_HOUR,
+    UnitOfLength,
+    UnitOfSpeed,
 )
 from homeassistant.helpers.entity import Entity
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    # SensorEntity,
+    # SensorEntityDescription,
+    # SensorStateClass,
+)
+
 
 from .const import DOMAIN
 
@@ -59,9 +63,22 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "fuelLevel", True, _connectedcarsclient)
                 )
+                sensors.append(
+                    MinVwEntity(vehicle, "fuel economy", False, _connectedcarsclient)
+                )
             if "odometer" in vehicle["has"]:
                 sensors.append(
                     MinVwEntity(vehicle, "odometer", True, _connectedcarsclient)
+                )
+                sensors.append(
+                    MinVwEntity(
+                        vehicle, "last years mileage", False, _connectedcarsclient
+                    )
+                )
+                sensors.append(
+                    MinVwEntity(
+                        vehicle, "last months mileage", False, _connectedcarsclient
+                    )
                 )
             if "NextServicePredicted" in vehicle["has"]:
                 sensors.append(
@@ -129,41 +146,52 @@ class MinVwEntity(Entity):
         self._dict = dict()
 
         if self._itemName == "outdoorTemperature":
-            self._unit = TEMP_CELSIUS
+            self._unit = UnitOfTemperature.CELSIUS
             self._icon = "mdi:thermometer"
-            self._device_class = DEVICE_CLASS_TEMPERATURE
+            self._device_class = SensorDeviceClass.TEMPERATURE
         elif self._itemName == "BatteryVoltage":
-            self._unit = ELECTRIC_POTENTIAL_VOLT
+            self._unit = UnitOfElectricPotential.VOLT
             self._icon = "mdi:car-battery"
-            self._device_class = DEVICE_CLASS_VOLTAGE
+            self._device_class = SensorDeviceClass.VOLTAGE
         elif self._itemName == "fuelPercentage":
             self._unit = PERCENTAGE
             self._icon = "mdi:gas-station"
-            # self._device_class = DEVICE_CLASS_VOLTAGE
+            # self._device_class = SensorDeviceClass.
         elif self._itemName == "fuelLevel":
-            self._unit = VOLUME_LITERS
+            self._unit = UnitOfVolume.LITERS
             self._icon = "mdi:gas-station"
-            # self._device_class = DEVICE_CLASS_VOLTAGE
+            self._device_class = SensorDeviceClass.VOLUME
         elif self._itemName == "odometer":
-            self._unit = LENGTH_KILOMETERS
+            self._unit = UnitOfLength.KILOMETERS
             self._icon = "mdi:counter"
-            # self._device_class = DEVICE_CLASS_VOLTAGE
+            self._device_class = SensorDeviceClass.DISTANCE
         elif self._itemName == "NextServicePredicted":
             # self._unit = ATTR_LOCATION
             self._icon = "mdi:wrench"
-            self._device_class = "date"  # DEVICE_CLASS_DATE
+            self._device_class = SensorDeviceClass.DATE
         elif self._itemName == "EVchargePercentage":
             self._unit = PERCENTAGE
             self._icon = "mdi:battery"
-            self._device_class = DEVICE_CLASS_BATTERY
+            self._device_class = SensorDeviceClass.BATTERY
         elif self._itemName == "EVHVBattTemp":
-            self._unit = TEMP_CELSIUS
+            self._unit = UnitOfTemperature.CELSIUS
             self._icon = "mdi:thermometer"
-            self._device_class = DEVICE_CLASS_TEMPERATURE
+            self._device_class = SensorDeviceClass.TEMPERATURE
         elif self._itemName == "Speed":
-            self._unit = SPEED_KILOMETERS_PER_HOUR
+            self._unit = UnitOfSpeed.KILOMETERS_PER_HOUR
             self._icon = "mdi:speedometer"
-        #            self._device_class = SPEED
+            self._device_class = SensorDeviceClass.SPEED
+        elif self._itemName == "last years mileage":
+            self._unit = UnitOfLength.KILOMETERS
+            self._icon = "mdi:counter"
+            self._device_class = SensorDeviceClass.DISTANCE
+        elif self._itemName == "last months mileage":
+            self._unit = UnitOfLength.KILOMETERS
+            self._icon = "mdi:counter"
+            self._device_class = SensorDeviceClass.DISTANCE
+        elif self._itemName == "fuel economy":
+            self._unit = "km/l"
+            self._icon = "mdi:gas-station-outline"
 
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
@@ -174,11 +202,15 @@ class MinVwEntity(Entity):
                 # Serial numbers are unique identifiers within a specific domain
                 (DOMAIN, self._vehicle["vin"])
             },
-            "name": self._vehicle["name"],
+            "name": f"{self._vehicle['make']} {self._vehicle['model']}",  # self._vehicle["name"],
             "manufacturer": self._vehicle["make"],
-            "model": self._vehicle["model"],
+            "model": self._vehicle["name"]
+            .removeprefix("VW")
+            .removeprefix("Skoda")
+            .removeprefix("Seat")
+            .removeprefix("Audi")
+            .strip(),
             "sw_version": self._vehicle["licensePlate"],
-            # "via_device": (hue.DOMAIN, self.api.bridgeid),
         }
 
     @property
@@ -269,6 +301,37 @@ class MinVwEntity(Entity):
             )
             # direction = self._dict["Direction"]
             # _LOGGER.debug(f"Speed: {self._state} km/h, direction: {direction}")
+        if self._itemName == "last years mileage" and (
+            self._data_date is None
+            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
+        ):
+            (
+                self._state,
+                self._dict,
+            ) = await self._connectedcarsclient.get_latest_years_mileage(
+                self._vehicle["id"], False
+            )
+            self._data_date = datetime.utcnow()
+        if self._itemName == "last months mileage" and (
+            self._data_date is None
+            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
+        ):
+            (
+                self._state,
+                self._dict,
+            ) = await self._connectedcarsclient.get_latest_years_mileage(
+                self._vehicle["id"], True
+            )
+            self._data_date = datetime.utcnow()
+        if self._itemName == "fuel economy" and (
+            self._data_date is None
+            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
+        ):
+            (
+                self._state,
+                self._dict,
+            ) = await self._connectedcarsclient.get_fuel_economy(self._vehicle["id"])
+            self._data_date = datetime.utcnow()
 
         # EV
         if self._itemName == "EVchargePercentage":

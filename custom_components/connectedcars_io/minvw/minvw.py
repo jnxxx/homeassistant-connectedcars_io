@@ -1,11 +1,11 @@
 """Wrapper for connectedcars.io."""
 
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-import json
-import asyncio
 import aiohttp
+import json
 
 
 # import hashlib
@@ -77,7 +77,7 @@ class MinVW:
         req_param = """query YearlyMileage {
   vehicle(id: %s) {
 
-    totalTripStatistics(period: {first: "%sZ", last: "%sZ"} ) {mileageInKm driveDurationInMinutes numberTrips longestMileageInKm}
+    totalTripStatistics(period: {first: "%sZ", last: "%sZ"} ) {mileageInKm, driveDurationInMinutes, numberTrips, longestMileageInKm}
   }
 }
         """
@@ -122,21 +122,15 @@ class MinVW:
 
         return ret, att
 
-    async def get_fuel_economy(self, vehicle_id):
-        """Calculate distance driven per liter of fuel."""
+    async def get_mileage_since_refuel(self, vehicle_id):
+        """Calculate distance since last refuel event."""
         ret = None
         att = dict()
 
         req_param = """query fuel {
   vehicle(id: %s) {
-    refuelEvents(limit: 2, order: DESC) {
-      litersAfter
-      litersBefore
+    refuelEvents(limit: 1) {
       time
-    }
-    fuelLevel {
-      time
-      liter
     }
   }
 }
@@ -145,30 +139,31 @@ class MinVW:
 
         vehicle_data = await self.api_request(req_param)
 
-        fuelevents = self._get_vehicle_value(
+        fuelevent = self._get_vehicle_value(
             vehicle_data, ["data", "vehicle", "refuelEvents"]
         )
-        fuellevel = self._get_vehicle_value(
-            vehicle_data, ["data", "vehicle", "fuelLevel"]
-        )
+        # fuellevel = self._get_vehicle_value(
+        #     vehicle_data, ["data", "vehicle", "fuelLevel"]
+        # )
 
-        if fuelevents is not None and len(fuelevents) >= 2 and fuellevel is not None:
-
-            fuel_used = 0
-            fuel_used += fuelevents[1]["litersAfter"] - fuelevents[0]["litersBefore"]
-            fuel_used += fuelevents[0]["litersAfter"] - fuellevel["liter"]
-            att["Fuel used"] = fuel_used
+        if (
+            fuelevent is not None
+            and len(fuelevent) == 1
+            and fuelevent[0]["time"] is not None
+        ):
 
             # Request distance
-            time_start = fuelevents[1]["time"]
-            time_end = fuellevel["time"]
-
             req_param = """query fuelDistance {
   vehicle(id: %s) {
-    totalTripStatistics(period: {first: "%s", last: "%s"} ) { mileageInKm }
+    totalTripStatistics(period: {first: "%s", last: "%sZ"} ) { mileageInKm, numberTrips }
   }
 }
             """
+            fuel_time = fuelevent[0]["time"]
+            att["Refueled at"] = fuel_time
+
+            time_start = fuel_time
+            time_end = datetime.utcnow().isoformat(timespec="milliseconds")
             req_param = req_param % (
                 vehicle_id,
                 time_start,
@@ -179,12 +174,78 @@ class MinVW:
             distance = self._get_vehicle_value(
                 vehicle_data, ["data", "vehicle", "totalTripStatistics", "mileageInKm"]
             )
-
             if distance is not None:
-                att["distance"] = distance
-                ret = round(distance / fuel_used, 1)
+                ret = round(distance, 1)
+
+            att["Trips"] = self._get_vehicle_value(
+                vehicle_data, ["data", "vehicle", "totalTripStatistics", "numberTrips"]
+            )
 
         return ret, att
+
+    #     async def get_fuel_economy(self, vehicle_id):
+    #         """Calculate distance driven per liter of fuel."""
+    #         ret = None
+    #         att = dict()
+
+    #         req_param = """query fuel {
+    #   vehicle(id: %s) {
+    #     refuelEvents(limit: 2, order: DESC) {
+    #       litersAfter
+    #       litersBefore
+    #       time
+    #     }
+    #     fuelLevel {
+    #       time
+    #       liter
+    #     }
+    #   }
+    # }
+    #         """
+    #         req_param = req_param % (vehicle_id)
+
+    #         vehicle_data = await self.api_request(req_param)
+
+    #         fuelevents = self._get_vehicle_value(
+    #             vehicle_data, ["data", "vehicle", "refuelEvents"]
+    #         )
+    #         fuellevel = self._get_vehicle_value(
+    #             vehicle_data, ["data", "vehicle", "fuelLevel"]
+    #         )
+
+    #         if fuelevents is not None and len(fuelevents) >= 2 and fuellevel is not None:
+
+    #             fuel_used = 0
+    #             fuel_used += fuelevents[1]["litersAfter"] - fuelevents[0]["litersBefore"]
+    #             fuel_used += fuelevents[0]["litersAfter"] - fuellevel["liter"]
+    #             att["Fuel used"] = fuel_used
+
+    #             # Request distance
+    #             time_start = fuelevents[1]["time"]
+    #             time_end = fuellevel["time"]
+
+    #             req_param = """query fuelDistance {
+    #   vehicle(id: %s) {
+    #     totalTripStatistics(period: {first: "%s", last: "%s"} ) { mileageInKm }
+    #   }
+    # }
+    #             """
+    #             req_param = req_param % (
+    #                 vehicle_id,
+    #                 time_start,
+    #                 time_end,
+    #             )
+
+    #             vehicle_data = await self.api_request(req_param)
+    #             distance = self._get_vehicle_value(
+    #                 vehicle_data, ["data", "vehicle", "totalTripStatistics", "mileageInKm"]
+    #             )
+
+    #             if distance is not None:
+    #                 att["distance"] = distance
+    #                 ret = round(distance / fuel_used, 1)
+
+    #         return ret, att
 
     async def get_value_float(self, vehicle_id, selector):
         """Extract a float value from read data"""
@@ -283,6 +344,8 @@ class MinVW:
                 has.append("fuelPercentage")
             if self._get_vehicle_value(vehicle, ["fuelLevel", "liter"]) is not None:
                 has.append("fuelLevel")
+            if self._get_vehicle_value(vehicle, ["fuelEconomy"]) is not None:
+                has.append("fuelEconomy")
             if self._get_vehicle_value(vehicle, ["odometer", "odometer"]) is not None:
                 has.append("odometer")
             if await self.get_next_service_data_predicted(vehicle_id) is not None:

@@ -63,6 +63,13 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "fuelLevel", True, _connectedcarsclient)
                 )
+            if "fuelLevel" in vehicle["has"] and "odometer" in vehicle["has"]:
+                sensors.append(
+                    MinVwEntity(
+                        vehicle, "mileage since refuel", False, _connectedcarsclient
+                    )
+                )
+            if "fuelEconomy" in vehicle["has"]:
                 sensors.append(
                     MinVwEntity(vehicle, "fuel economy", False, _connectedcarsclient)
                 )
@@ -72,12 +79,12 @@ async def async_setup_entry(
                 )
                 sensors.append(
                     MinVwEntity(
-                        vehicle, "last years mileage", False, _connectedcarsclient
+                        vehicle, "mileage latest year", False, _connectedcarsclient
                     )
                 )
                 sensors.append(
                     MinVwEntity(
-                        vehicle, "last months mileage", False, _connectedcarsclient
+                        vehicle, "mileage latest month", False, _connectedcarsclient
                     )
                 )
             if "NextServicePredicted" in vehicle["has"]:
@@ -181,11 +188,15 @@ class MinVwEntity(Entity):
             self._unit = UnitOfSpeed.KILOMETERS_PER_HOUR
             self._icon = "mdi:speedometer"
             self._device_class = SensorDeviceClass.SPEED
-        elif self._itemName == "last years mileage":
+        elif self._itemName == "mileage latest year":
             self._unit = UnitOfLength.KILOMETERS
             self._icon = "mdi:counter"
             self._device_class = SensorDeviceClass.DISTANCE
-        elif self._itemName == "last months mileage":
+        elif self._itemName == "mileage latest month":
+            self._unit = UnitOfLength.KILOMETERS
+            self._icon = "mdi:counter"
+            self._device_class = SensorDeviceClass.DISTANCE
+        elif self._itemName == "mileage since refuel":
             self._unit = UnitOfLength.KILOMETERS
             self._icon = "mdi:counter"
             self._device_class = SensorDeviceClass.DISTANCE
@@ -301,7 +312,7 @@ class MinVwEntity(Entity):
             )
             # direction = self._dict["Direction"]
             # _LOGGER.debug(f"Speed: {self._state} km/h, direction: {direction}")
-        if self._itemName == "last years mileage" and (
+        if self._itemName == "mileage latest year" and (
             self._data_date is None
             or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
         ):
@@ -312,7 +323,7 @@ class MinVwEntity(Entity):
                 self._vehicle["id"], False
             )
             self._data_date = datetime.utcnow()
-        if self._itemName == "last months mileage" and (
+        if self._itemName == "mileage latest month" and (
             self._data_date is None
             or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
         ):
@@ -323,15 +334,24 @@ class MinVwEntity(Entity):
                 self._vehicle["id"], True
             )
             self._data_date = datetime.utcnow()
-        if self._itemName == "fuel economy" and (
+        if self._itemName == "mileage since refuel" and (
             self._data_date is None
             or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
         ):
             (
                 self._state,
                 self._dict,
-            ) = await self._connectedcarsclient.get_fuel_economy(self._vehicle["id"])
+            ) = await self._connectedcarsclient.get_mileage_since_refuel(
+                self._vehicle["id"]
+            )
             self._data_date = datetime.utcnow()
+        if self._itemName == "fuel economy":
+            self._state = round(
+                await self._connectedcarsclient.get_value(
+                    self._vehicle["id"], ["fuelEconomy"]
+                ),
+                1,
+            )
 
         # EV
         if self._itemName == "EVchargePercentage":

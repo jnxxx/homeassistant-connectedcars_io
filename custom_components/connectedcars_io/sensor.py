@@ -1,7 +1,7 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
 import logging
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 import traceback
 
 from homeassistant import config_entries, core
@@ -12,15 +12,19 @@ from homeassistant.const import (
     PERCENTAGE,
     UnitOfLength,
     UnitOfSpeed,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
 )
-from homeassistant.helpers.entity import Entity
+
+# from homeassistant.helpers.entity import Entity
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.components.sensor import (
     SensorDeviceClass,
-    # SensorEntity,
+    SensorEntity,
+    RestoreSensor,
     # SensorEntityDescription,
-    # SensorStateClass,
+    SensorStateClass,
 )
 
 
@@ -43,7 +47,8 @@ async def async_setup_entry(
 
     try:
         sensors = []
-        data = await _connectedcarsclient.get_vehicle_instances()
+        sensors_update_later = []
+        data = await _connectedcarsclient.get_vehicle_instances(True)
         for vehicle in data:
             if "outdoorTemperature" in vehicle["has"]:
                 sensors.append(
@@ -55,6 +60,10 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "BatteryVoltage", True, _connectedcarsclient)
                 )
+            if "odometer" in vehicle["has"]:
+                sensors.append(
+                    MinVwEntity(vehicle, "odometer", True, _connectedcarsclient)
+                )
             if "fuelPercentage" in vehicle["has"]:
                 sensors.append(
                     MinVwEntity(vehicle, "fuelPercentage", True, _connectedcarsclient)
@@ -63,29 +72,9 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "fuelLevel", True, _connectedcarsclient)
                 )
-            if "fuelLevel" in vehicle["has"] and "odometer" in vehicle["has"]:
-                sensors.append(
-                    MinVwEntity(
-                        vehicle, "mileage since refuel", False, _connectedcarsclient
-                    )
-                )
             if "fuelEconomy" in vehicle["has"]:
                 sensors.append(
                     MinVwEntity(vehicle, "fuel economy", False, _connectedcarsclient)
-                )
-            if "odometer" in vehicle["has"]:
-                sensors.append(
-                    MinVwEntity(vehicle, "odometer", True, _connectedcarsclient)
-                )
-                sensors.append(
-                    MinVwEntity(
-                        vehicle, "mileage latest year", False, _connectedcarsclient
-                    )
-                )
-                sensors.append(
-                    MinVwEntity(
-                        vehicle, "mileage latest month", False, _connectedcarsclient
-                    )
                 )
             if "NextServicePredicted" in vehicle["has"]:
                 sensors.append(
@@ -107,7 +96,29 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "Speed", True, _connectedcarsclient)
                 )
+            if "totalTripStatistics" in vehicle["has"]:
+                sensors.append(
+                    MinVwEntity(
+                        vehicle, "mileage latest year", False, _connectedcarsclient
+                    )
+                )
+                sensors.append(
+                    MinVwEntity(
+                        vehicle, "mileage latest month", False, _connectedcarsclient
+                    )
+                )
+            if (
+                "refuelEvents" in vehicle["has"]
+                and "trips" in vehicle["has"]
+                and "odometer" in vehicle["has"]
+            ):
+                sensors_update_later.append(
+                    MinVwEntityRestore(
+                        vehicle, "mileage since refuel", False, _connectedcarsclient
+                    )
+                )
         async_add_entities(sensors, update_before_add=True)
+        async_add_entities(sensors_update_later, update_before_add=False)
 
     except Exception as err:
         _LOGGER.warning("Failed to add sensors: %s", err)
@@ -130,7 +141,7 @@ async def async_setup_entry(
                 device_registry.async_remove_device(device_entry.id)
 
 
-class MinVwEntity(Entity):
+class MinVwEntity(SensorEntity):
     """Representation of a Sensor."""
 
     def __init__(
@@ -172,6 +183,7 @@ class MinVwEntity(Entity):
             self._unit = UnitOfLength.KILOMETERS
             self._icon = "mdi:counter"
             self._device_class = SensorDeviceClass.DISTANCE
+            self._attr_state_class = SensorStateClass.TOTAL
         elif self._itemName == "NextServicePredicted":
             # self._unit = ATTR_LOCATION
             self._icon = "mdi:wrench"
@@ -314,7 +326,7 @@ class MinVwEntity(Entity):
             # _LOGGER.debug(f"Speed: {self._state} km/h, direction: {direction}")
         if self._itemName == "mileage latest year" and (
             self._data_date is None
-            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
+            or datetime.utcnow() >= self._data_date + timedelta(hours=1)
         ):
             (
                 self._state,
@@ -322,10 +334,11 @@ class MinVwEntity(Entity):
             ) = await self._connectedcarsclient.get_latest_years_mileage(
                 self._vehicle["id"], False
             )
-            self._data_date = datetime.utcnow()
+            if self._state is not None:
+                self._data_date = datetime.utcnow()
         if self._itemName == "mileage latest month" and (
             self._data_date is None
-            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
+            or datetime.utcnow() >= self._data_date + timedelta(hours=1)
         ):
             (
                 self._state,
@@ -333,18 +346,84 @@ class MinVwEntity(Entity):
             ) = await self._connectedcarsclient.get_latest_years_mileage(
                 self._vehicle["id"], True
             )
-            self._data_date = datetime.utcnow()
-        if self._itemName == "mileage since refuel" and (
-            self._data_date is None
-            or self._data_date >= datetime.utcnow() + timedelta(hours=-1)
-        ):
-            (
-                self._state,
-                self._dict,
-            ) = await self._connectedcarsclient.get_mileage_since_refuel(
-                self._vehicle["id"]
+            if self._state is not None:
+                self._data_date = datetime.utcnow()
+        if self._itemName == "mileage since refuel":
+            self._state = None
+
+            refuel_event_time = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["refuelEvents", 0, "time"]
             )
-            self._data_date = datetime.utcnow()
+            if refuel_event_time is not None:
+                # Has refuel timestamp changed?
+                if (
+                    "Refueled at" not in self._dict
+                    or self._dict["Refueled at"] is None
+                    or refuel_event_time != self._dict["Refueled at"]
+                ):
+                    _LOGGER.debug("Refuel event detected.")
+                    self._dict["Refueled at"] = refuel_event_time
+                    self._dict["Odometer"] = None
+
+                # Do we have odometer value corresponding to refuel timestamp?
+                if "Odometer" not in self._dict or self._dict["Odometer"] is None:
+                    trip = await self._connectedcarsclient.get_trip_at_time(
+                        self._vehicle["id"], refuel_event_time
+                    )
+                    if trip is not None and "startOdometer" in trip:
+                        _LOGGER.debug(
+                            "Got odometer value at refuel event: %s",
+                            trip["startOdometer"],
+                        )
+                        self._dict["Odometer"] = trip["startOdometer"]
+
+                # Subtract refuel odometer from current odometer
+                if "Odometer" in self._dict and self._dict["Odometer"] is not None:
+                    odometer_current = await self._connectedcarsclient.get_value(
+                        self._vehicle["id"], ["odometer", "odometer"]
+                    )
+                    distance_since_refuel = odometer_current - self._dict["Odometer"]
+                    if distance_since_refuel >= 0:
+                        self._state = distance_since_refuel
+
+            # ignition = (
+            #     str(
+            #         await self._connectedcarsclient.get_value(
+            #             self._vehicle["id"], ["ignition", "on"]
+            #         )
+            #     ).lower()
+            #     == "true"
+            # )
+            # try:
+            #     ignition_time = datetime.fromisoformat(
+            #         str(
+            #             await self._connectedcarsclient.get_value(
+            #                 self._vehicle["id"], ["ignition", "time"]
+            #             )
+            #         ).replace("Z", "+00:00")
+            #     )
+            # except Exception as err:  # pylint: disable=broad-except
+            #     _LOGGER.warning("Unable to parse ignition timestamp. Err: %s", err)
+            # _LOGGER.debug("ignition: %s, time: %s", ignition, ignition_time)
+
+            # if (
+            #     self._data_date is None
+            #     or datetime.utcnow() >= self._data_date + timedelta(hours=1)
+            #     or (
+            #         not ignition
+            #         and ignition_time > self._data_date.replace(tzinfo=timezone.utc)
+            #     )
+            # ):
+            #     (
+            #         self._state,
+            #         self._dict,
+            #     ) = await self._connectedcarsclient.get_mileage_since_refuel(
+            #         self._vehicle["id"]
+            #     )
+            #     _LOGGER.debug("5")
+            #     if self._state is not None:
+            #         self._data_date = datetime.utcnow()
+
         if self._itemName == "fuel economy":
             self._state = round(
                 await self._connectedcarsclient.get_value(
@@ -369,3 +448,55 @@ class MinVwEntity(Entity):
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["highVoltageBatteryTemperature", "celsius"]
             )
+
+
+class MinVwEntityRestore(MinVwEntity, RestoreSensor):
+    """Representation of a restoring sensor."""
+
+    # def __init__(
+    #     self, vehicle, itemName, entity_registry_enabled_default, connectedcarsclient
+    # ):
+    #     """Inherited"""
+    #     super().__init__(
+    #         vehicle, itemName, entity_registry_enabled_default, connectedcarsclient
+    #     )
+
+    async def async_added_to_hass(self):
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+
+        if (
+            (last_state := await self.async_get_last_state()) is not None
+            # and (extra_data := await self.async_get_last_sensor_data()) is not None
+            and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+            # The trigger might have fired already while we waited for stored data,
+            # then we should not restore state
+            #            and CONF_STATE not in self._rendered
+        ):
+            _LOGGER.debug(
+                "Read previously stored state and attributes for sensor: %s",
+                self._unique_id,
+            )
+            self._state = last_state.state
+
+            for key in last_state.attributes:
+                if key not in [
+                    "unit_of_measurement",
+                    "device_class",
+                    "icon",
+                    "friendly_name",
+                ]:
+                    self._dict[key] = last_state.attributes[key]
+            _LOGGER.debug("State: %s, Attributes: %s", last_state.state, self._dict)
+
+        await MinVwEntity.async_update(self)
+        self.async_write_ha_state()
+
+    # async def async_get_last_sensor_data(self):
+    #     """Restore Utility Meter Sensor Extra Stored Data."""
+    #     _LOGGER.debug("2")
+    #     if (restored_last_extra_data := await self.async_get_last_extra_data()) is None:
+    #         return None
+
+    #     _LOGGER.debug("3")
+    #     return restored_last_extra_data.as_dict()

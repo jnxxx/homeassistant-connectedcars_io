@@ -146,7 +146,7 @@ class MinVwEntity(SensorEntity):
 
     def __init__(
         self, vehicle, itemName, entity_registry_enabled_default, connectedcarsclient
-    ):
+    ) -> None:
         """Initialize the sensor."""
         self._state = None
         self._data_date = None
@@ -361,7 +361,7 @@ class MinVwEntity(SensorEntity):
                     or self._dict["Refueled at"] is None
                     or refuel_event_time != self._dict["Refueled at"]
                 ):
-                    _LOGGER.debug("Refuel event detected.")
+                    _LOGGER.debug("Refuel event detected")
                     self._dict["Refueled at"] = refuel_event_time
                     self._dict["Odometer"] = None
 
@@ -435,7 +435,7 @@ class MinVwEntity(SensorEntity):
         # EV
         if self._itemName == "EVchargePercentage":
             self._state = await self._connectedcarsclient.get_value(
-                self._vehicle["id"], ["chargePercentage", "percent"]
+                self._vehicle["id"], ["chargePercentage", "pct"]
             )
             batlevel = round(self._state / 10) * 10
             if batlevel == 100:

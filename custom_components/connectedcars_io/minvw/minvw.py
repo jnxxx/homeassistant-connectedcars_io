@@ -22,7 +22,7 @@ class MinVW:
     Primary exported interface for connectedcars.io API wrapper.
     """
 
-    def __init__(self, email, password, namespace):
+    def __init__(self, email, password, namespace) -> None:
         self._email = email
         self._password = password
         self._namespace = namespace
@@ -52,7 +52,6 @@ class MinVW:
 
         try:
             async with self._lock_update:
-
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
@@ -295,6 +294,93 @@ class MinVW:
 
     #         return ret, att
 
+    def has_value(self, obj, key) -> bool:
+        return key in obj.keys() and obj[key] is not None
+
+    def obj_copy_attributes(self, obj_src, obj_dst, keys):
+        if obj_src is not None and obj_dst is not None:
+            for key in keys:
+                if self.has_value(obj_src, key):
+                    # obj_dst[keys[key]] = obj_src[key]
+                    obj_dst[key] = obj_src[key]
+        return obj_dst
+
+    async def get_leads(self, vehicle_id):
+        """Find vehicle."""
+        ret = []
+        data = await self._get_vehicle_data()
+        for item in data["data"]["viewer"]["vehicles"]:
+            vehicle = item["vehicle"]
+            if vehicle["id"] == vehicle_id:
+                # j = 0
+                for lead in vehicle["leads"]:
+                    try:
+                        # Basic info
+                        element = {
+                            "type": lead["type"],
+                            "createdTime": lead["createdTime"],
+                        }
+                        # Optional info
+                        element = self.obj_copy_attributes(
+                            lead,
+                            element,
+                            [
+                                "updatedTime",
+                                "bookingTime",
+                                "lastContactedTime",
+                                "severityScore",
+                            ],
+                        )
+                        # Value
+                        if self.has_value(lead, "value"):
+                            element[
+                                "value"
+                            ] = f"{lead['value']['amount']} {lead['value']['currency']}"
+
+                        # Context - Type specific info
+                        if self.has_value(lead, "context"):
+                            # Type: service_reminder
+                            if lead["type"] == "service_reminder":
+                                element["context"] = self.obj_copy_attributes(
+                                    lead["context"],
+                                    {},
+                                    ["serviceDate", "oilEstimateUncertain"],
+                                )
+                                if lead["context"]["sourceData"] is not None:
+                                    for data in lead["context"]["sourceData"]:
+                                        if (
+                                            data is not None
+                                            and data["type"] is not None
+                                            and data["value"] is not None
+                                        ):
+                                            element["context"][data["type"]] = data[
+                                                "value"
+                                            ]
+                            else:
+                                if self.has_value(lead, "context"):
+                                    element["context"] = lead["context"]
+
+                            # Remove emply values in context
+                            remove_keys = []
+                            if element["context"] is not None:
+                                for key in element["context"].keys():
+                                    if element["context"][key] is None:
+                                        _LOGGER.debug("Ket to remove: %s", key)
+                                        remove_keys.append(key)
+                            for key in remove_keys:
+                                element["context"].pop(key)
+
+                        ret.append(element)
+
+                        # j = j + 1
+                        # if j >= 5:
+                        #     break
+
+                    except Exception as err:  # pylint: disable=broad-except
+                        _LOGGER.error("Failed to handle lead: %s\n%s", lead, err)
+
+        return ret
+
     async def get_value_float(self, vehicle_id, selector):
         """Extract a float value from read data"""
         ret = None
@@ -399,7 +485,7 @@ class MinVW:
             if await self.get_next_service_data_predicted(vehicle_id) is not None:
                 has.append("NextServicePredicted")
             if (
-                self._get_vehicle_value(vehicle, ["chargePercentage", "percent"])
+                self._get_vehicle_value(vehicle, ["chargePercentage", "pct"])
                 is not None
             ):
                 has.append("EVchargePercentage")
@@ -546,7 +632,7 @@ vehicle(id: %s) {
           km
         }
         chargePercentage {
-          percent
+          pct
           time
         }
         highVoltageBatteryTemperature {
@@ -583,10 +669,52 @@ vehicle(id: %s) {
           voltage
           time
         }
-        health {
-          ok
-          recommendation
+        health { ok }
+        leads(statuses: [open], orderBy: {field: created_at, direction: DESC}) {
+          type
+          status
+          interactions{time, channel}
+          severityScore
+          value{amount, currency}
+          createdTime
+          updatedTime
+          lastActivityTime
+          bookingTime
+          lastContactedTime
+          context {
+            ... on LeadErrorCodeContext {
+                errorCode, ecu, provider, errorCodeCount, description, severity
+            }
+            ... on LeadLowBatteryVoltageContext {
+                sourceMedianVoltage { voltage }
+            }
+            ... on LeadServiceReminderContext {
+                serviceDate, oilEstimateUncertain, sourceData { type, value }
+            }
+            ... on  LeadConnectivityIssueContext{
+                latestVehiclePositionRecordTime
+            }
+            ... on  LeadEngineLampContext{
+                lamps { type, color, title, subtitle, recommendationText, descriptionTitle, descriptionText }
+            }
+            ... on LeadMainPowerDisconnectContext{
+                disconnectionEventTime, disconnectionLatitude, disconnectionLongitude, disconnectionPositionTime, unitConnectionState, lastConnectionEventTime, incidentCount
+            }
+            ... on LeadDefaultContext{
+              context
+            }
+            ... on LeadRapidBatteryDischargeContext{
+               time, durationHours, minVoltage, maxVoltage, voltageDrop
+            }
+            ... on LeadQuoteContext{
+				quote{workshop{name},title,price{amount, currency},expirationDate,status}
+            }
+            ... on UserReportedLampLeadContext{
+				type, color, frequency, source
+            }
+          }
         }
+
       }
     }
   }
@@ -691,7 +819,7 @@ vehicle(id: %s) {
                     self._at_expires = datetime.utcnow() + timedelta(
                         seconds=int(result_json["expires"]) - 120
                     )
-                    _LOGGER.debug("Got access token: %s...", self._accesstoken[:20])
+                    _LOGGER.debug("Got access token: %s...", self._accesstoken[:10])
                 if (
                     result_json is not None
                     and "error" in result_json

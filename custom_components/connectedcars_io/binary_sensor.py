@@ -73,7 +73,7 @@ class CcBinaryEntity(BinarySensorEntity):
         device_class,
         entity_registry_enabled_default,
         connectedcarsclient,
-    ):
+    ) -> None:
         self._vehicle = vehicle
         self._itemName = itemName
         self._subitemName = subitemName
@@ -84,6 +84,7 @@ class CcBinaryEntity(BinarySensorEntity):
         self._connectedcarsclient = connectedcarsclient
         self._is_on = None
         self._entity_registry_enabled_default = entity_registry_enabled_default
+        self._dict = dict()
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
     @property
@@ -137,6 +138,14 @@ class CcBinaryEntity(BinarySensorEntity):
     def device_class(self):
         return self._device_class
 
+    @property
+    def extra_state_attributes(self):
+        """Return state attributes."""
+        attributes = dict()
+        for key in self._dict:
+            attributes[key] = self._dict[key]
+        return attributes
+
     async def async_update(self):
         """Update data."""
         self._is_on = None
@@ -158,6 +167,9 @@ class CcBinaryEntity(BinarySensorEntity):
                         )
                     ).lower()
                     != "true"
+                )
+                self._dict["Leads"] = await self._connectedcarsclient.get_leads(
+                    self._vehicle["id"]
                 )
             elif self._itemName == "Lamp":
                 self._is_on = (

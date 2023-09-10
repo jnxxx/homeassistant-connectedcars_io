@@ -683,7 +683,7 @@ vehicle(id: %s) {
           lastContactedTime
           context {
             ... on LeadErrorCodeContext {
-                errorCode, ecu, provider, errorCodeCount, description, severity
+                errorCode, ecu, provider, errorCodeCount, description, severity, firstErrorCodeTime, lastErrorCodeTime
             }
             ... on LeadLowBatteryVoltageContext {
                 sourceMedianVoltage { voltage }

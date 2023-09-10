@@ -10,7 +10,7 @@ from homeassistant.components.binary_sensor import (
 )  # ,  BinarySensorEntityDescription
 from homeassistant.exceptions import PlatformNotReady
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_HEALTH_SENSITIVITY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +40,13 @@ async def async_setup_entry(
             if "Health" in vehicle["has"]:
                 sensors.append(
                     CcBinaryEntity(
-                        vehicle, "Health", "", "problem", True, _connectedcarsclient
+                        vehicle,
+                        "Health",
+                        "",
+                        "problem",
+                        True,
+                        _connectedcarsclient,
+                        config[CONF_HEALTH_SENSITIVITY],
                     )
                 )
             for lampState in vehicle["lampStates"]:
@@ -73,6 +79,7 @@ class CcBinaryEntity(BinarySensorEntity):
         device_class,
         entity_registry_enabled_default,
         connectedcarsclient,
+        sensitivity=None,
     ) -> None:
         self._vehicle = vehicle
         self._itemName = itemName
@@ -82,6 +89,7 @@ class CcBinaryEntity(BinarySensorEntity):
         self._unique_id = f"{DOMAIN}-{self._vehicle['vin']}-{self._itemName}{self._subitemName.capitalize()}"
         self._device_class = device_class
         self._connectedcarsclient = connectedcarsclient
+        self._sensitivity = sensitivity
         self._is_on = None
         self._entity_registry_enabled_default = entity_registry_enabled_default
         self._dict = dict()
@@ -142,8 +150,8 @@ class CcBinaryEntity(BinarySensorEntity):
     def extra_state_attributes(self):
         """Return state attributes."""
         attributes = dict()
-        for key in self._dict:
-            attributes[key] = self._dict[key]
+        for key, value in self._dict.items():
+            attributes[key] = value
         return attributes
 
     async def async_update(self):
@@ -160,17 +168,19 @@ class CcBinaryEntity(BinarySensorEntity):
                     == "true"
                 )
             elif self._itemName == "Health":
-                self._is_on = (
-                    str(
-                        await self._connectedcarsclient.get_value(
-                            self._vehicle["id"], ["health", "ok"]
-                        )
-                    ).lower()
-                    != "true"
-                )
+                # self._is_on = (
+                #     str(
+                #         await self._connectedcarsclient.get_value(
+                #             self._vehicle["id"], ["health", "ok"]
+                #         )
+                #     ).lower()
+                #     != "true"
+                # )
                 self._dict["Leads"] = await self._connectedcarsclient.get_leads(
                     self._vehicle["id"]
                 )
+                self._is_on = self.evaluate_health()
+
             elif self._itemName == "Lamp":
                 self._is_on = (
                     str(
@@ -183,3 +193,38 @@ class CcBinaryEntity(BinarySensorEntity):
 
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Unable to get binary state: %s", err)
+
+    def evaluate_health(self):
+        ret = False
+        for lead in self._dict["Leads"]:
+            if "type" in lead and lead["type"] is not None:
+                t = lead["type"]
+                if self._sensitivity == "high" and t in (
+                    "error_code_high",
+                    "lamp_engine_lamp",
+                ):
+                    ret = True
+                elif self._sensitivity == "medium" and (
+                    t
+                    in (
+                        "error_code_high",
+                        "error_code_medium",
+                        "poor_battery",
+                    )
+                    or t.startswith("lamp_")
+                ):
+                    ret = True
+                elif self._sensitivity == "low" and (
+                    t
+                    in (
+                        "error_code_high",
+                        "error_code_medium",
+                        "error_code",
+                        "poor_battery",
+                    )
+                    or t.startswith("lamp_")
+                ):
+                    ret = True
+                elif self._sensitivity == "all":
+                    ret = True
+        return ret

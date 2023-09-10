@@ -15,16 +15,33 @@
                 },
                 "description": "Enter credentials.\n\nKnown namespaces: minvolkswagen, minskoda, minseat, mitaudi",
                 "title": "Authentication"
-            },
-            "repo": {
+            }
+        }
+    },
+
+    "options": {
+        "error": {
+        },
+        "step": {
+            "init": {
                 "data": {
-                    "add_another": "Add another repo?",
-                    "path": "Path to the repository e.g. boralyl/github-custom",
-                    "name": "Name of the sensor."
+                    "health_sensitivity": "Choose sensitivity threshold of health sensor:"
                 },
-                "description": "Add a GitHub repo, check the box to add another.",
-                "title": "Add GitHub Repository"
+                "description": "",
+                "title": "Options"
+            }
+        }
+    },
+
+    "selector": {
+        "health_sensitivity": {
+            "options": {
+                "high": "High: Engine lamp and high severity error codes",
+                "medium": "Medium: Any lamp, medium severity error codes and poor battery",
+                "low": "Low: Any lamp, any error codes and poor battery",
+                "all": "Any: Any indication"
             }
         }
     }
+
 }

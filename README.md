@@ -89,5 +89,3 @@ Dashboard
 
 Location state  
 ![Location state](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/location_state.png)
-
-

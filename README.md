@@ -49,14 +49,21 @@ Sensor names:
 * fuelLevel
 * fuelPercentage
 * GeoLocation
-* Health
+* Health (severity threshold configurable)
+  * Attribute: Leads array may help to explain the cause
 * Ignition
 * Lamp *+name* (one sensor per each reported lamp, disabled by default)
 * NextServicePredicted (disabled by default)
 * odometer
 * outdoorTemperature
 * Speed
+* Fuel economy (disabled by default)
+* Mileage latest year (disabled by default)
+* Mileage latest month (disabled by default)
+* Mileage since refuel (disabled by default)
 
+All sensors may not be reported correctedly with all cars.
+Among others fuelPercentage is one of those.
 
 ## Debugging
 It is possible to debug log the raw response from the API. This is done by setting up logging like below in configuration.yaml in Home Assistant. It is also possible to set the log level through a service call in UI.  
@@ -71,7 +78,8 @@ logger:
 ## Examples
 
 Configuration  
-![Config](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/config.png)
+![Config](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/config.png)  
+![Options](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/options.png)
 
 Device  
 ![Device](https://github.com/jnxxx/homeassistant-connectedcars_io/raw/main/images/device.png)

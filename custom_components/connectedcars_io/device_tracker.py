@@ -44,7 +44,7 @@ async def async_setup_entry(
 class CcTrackerEntity(TrackerEntity):
     """Representation of a Device TrackerEntity."""
 
-    def __init__(self, vehicle, itemName, connectedcarsclient):
+    def __init__(self, vehicle, itemName, connectedcarsclient) -> None:
         self._vehicle = vehicle
         self._itemName = itemName
         self._icon = "mdi:map"
@@ -159,16 +159,14 @@ class CcTrackerEntity(TrackerEntity):
                 ).lower()
                 == "true"
             )
-            try:
+            ignition_time = None
+            timestamp = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["ignition", "time"]
+            )
+            if is_date_valid(timestamp):
                 ignition_time = datetime.fromisoformat(
-                    str(
-                        await self._connectedcarsclient.get_value(
-                            self._vehicle["id"], ["ignition", "time"]
-                        )
-                    ).replace("Z", "+00:00")
+                    str(timestamp).replace("Z", "+00:00")
                 )
-            except Exception as err:  # pylint: disable=broad-except
-                _LOGGER.warning("Unable to parse ignition timestamp. Err: %s", err)
             _LOGGER.debug("ignition: %s, time: %s", ignition, ignition_time)
 
             latitude = await self._connectedcarsclient.get_value_float(
@@ -183,7 +181,12 @@ class CcTrackerEntity(TrackerEntity):
                 self._cached_location = None
                 self._cached_time = None
             else:
-                if self._cached_location is None or ignition_time > self._cached_time:
+                if (
+                    self._cached_location is None
+                    or ignition_time is None
+                    or self._cached_time is None
+                    or ignition_time > self._cached_time
+                ):
                     self._cached_location = position
                     self._cached_time = ignition_time
                     _LOGGER.debug("position: %s", position)
@@ -196,3 +199,16 @@ class CcTrackerEntity(TrackerEntity):
 
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Unable to get vehicle location: %s", err)
+
+
+def is_date_valid(date) -> bool:
+    valid_date = True
+    try:
+        valid_date = (
+            False
+            if (date is None)
+            else bool(datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%f%z"))
+        )
+    except ValueError:
+        valid_date = False
+    return valid_date

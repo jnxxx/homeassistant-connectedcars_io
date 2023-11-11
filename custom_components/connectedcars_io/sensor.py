@@ -154,6 +154,7 @@ class MinVwEntity(SensorEntity):
         self._vehicle = vehicle
         self._itemName = itemName
         self._icon = "mdi:car"
+        self._suggested_display_precision = None
         self._name = (
             f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
         )
@@ -215,6 +216,7 @@ class MinVwEntity(SensorEntity):
         elif self._itemName == "fuel economy":
             self._unit = "km/l"
             self._icon = "mdi:gas-station-outline"
+            self._suggested_display_precision = 1
 
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
@@ -282,6 +284,11 @@ class MinVwEntity(SensorEntity):
     def unit_of_measurement(self):
         """Return the unit of measurement."""
         return self._unit
+
+    @property
+    def suggested_display_precision(self):
+        """Return the suggested_display_precision."""
+        return self._suggested_display_precision
 
     async def async_update(self):
         """Fetch new state data for the sensor.
@@ -354,7 +361,8 @@ class MinVwEntity(SensorEntity):
             refuel_event_time = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["refuelEvents", 0, "time"]
             )
-            if refuel_event_time is not None:
+            valid_date = is_date_valid(refuel_event_time)
+            if valid_date:
                 # Has refuel timestamp changed?
                 if (
                     "Refueled at" not in self._dict
@@ -370,18 +378,23 @@ class MinVwEntity(SensorEntity):
                     trip = await self._connectedcarsclient.get_trip_at_time(
                         self._vehicle["id"], refuel_event_time
                     )
-                    if trip is not None and "startOdometer" in trip:
+                    if (
+                        trip is not None
+                        and "startOdometer" in trip
+                        and trip["startOdometer"] is not None
+                    ):
                         _LOGGER.debug(
                             "Got odometer value at refuel event: %s",
                             trip["startOdometer"],
                         )
                         self._dict["Odometer"] = trip["startOdometer"]
 
-                # Subtract refuel odometer from current odometer
-                if "Odometer" in self._dict and self._dict["Odometer"] is not None:
-                    odometer_current = await self._connectedcarsclient.get_value(
-                        self._vehicle["id"], ["odometer", "odometer"]
-                    )
+            # Subtract refuel odometer from current odometer
+            if "Odometer" in self._dict and self._dict["Odometer"] is not None:
+                odometer_current = await self._connectedcarsclient.get_value(
+                    self._vehicle["id"], ["odometer", "odometer"]
+                )
+                if odometer_current is not None:
                     distance_since_refuel = odometer_current - self._dict["Odometer"]
                     if distance_since_refuel >= 0:
                         self._state = distance_since_refuel
@@ -425,12 +438,12 @@ class MinVwEntity(SensorEntity):
             #         self._data_date = datetime.utcnow()
 
         if self._itemName == "fuel economy":
-            self._state = round(
-                await self._connectedcarsclient.get_value(
-                    self._vehicle["id"], ["fuelEconomy"]
-                ),
-                1,
+            self._state = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["fuelEconomy"]
             )
+            # if fuelEconomy is not None:
+            #     fuelEconomy = round(fuelEconomy, 1)
+            # self._state = fuelEconomy
 
         # EV
         if self._itemName == "EVchargePercentage":
@@ -448,6 +461,19 @@ class MinVwEntity(SensorEntity):
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["highVoltageBatteryTemperature", "celsius"]
             )
+
+
+def is_date_valid(date) -> bool:
+    valid_date = True
+    try:
+        valid_date = (
+            False
+            if (date is None)
+            else bool(datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%f%z"))
+        )
+    except ValueError:
+        valid_date = False
+    return valid_date
 
 
 class MinVwEntityRestore(MinVwEntity, RestoreSensor):

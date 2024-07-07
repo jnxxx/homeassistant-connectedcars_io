@@ -1,14 +1,14 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
 import logging
-import asyncio
 
 from homeassistant import config_entries, core
+
+from .const import CONF_HEALTH_SENSITIVITY, DOMAIN
 from .minvw import MinVW
-from .const import DOMAIN, CONF_HEALTH_SENSITIVITY
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "binary_sensor", "device_tracker"]
+PLATFORMS = ["binary_sensor", "device_tracker", "sensor"]
 
 
 async def async_setup_entry(
@@ -35,10 +35,7 @@ async def async_setup_entry(
     hass.data[DOMAIN][entry.entry_id] = data  # entry.data
 
     # Forward the setup to the sensor platform.
-    for component in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, component)
-        )
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
@@ -61,21 +58,13 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
 
-    data = hass.data[DOMAIN][entry.entry_id]
-
+    # data = hass.data[DOMAIN][entry.entry_id]
     # # Cancel previous timer
     # if ("timer_remove" in data) and (data["timer_remove"] is not None):
     #     _LOGGER.debug("Remove timer")
     #     data["timer_remove"]()
 
-    unloaded = []
-    for component in PLATFORMS:
-        unloaded.append(
-            await asyncio.gather(
-                *[hass.config_entries.async_forward_entry_unload(entry, component)]
-            )
-        )
-    unload_ok = all(unloaded)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     # Remove options_update_listener.
     hass.data[DOMAIN][entry.entry_id]["unsub_options_update_listener"]()

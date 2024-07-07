@@ -1,32 +1,31 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
+from datetime import UTC, datetime, timedelta, timezone
 import logging
-from datetime import timedelta, datetime, timezone
 import traceback
 
 from homeassistant import config_entries, core
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+    # SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.const import (
-    UnitOfTemperature,
-    UnitOfElectricPotential,
-    UnitOfVolume,
     PERCENTAGE,
-    UnitOfLength,
-    UnitOfSpeed,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
+    UnitOfElectricPotential,
+    UnitOfLength,
+    UnitOfSpeed,
+    UnitOfTemperature,
+    UnitOfVolume,
 )
 
 # from homeassistant.helpers.entity import Entity
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers import device_registry as dr
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    RestoreSensor,
-    # SensorEntityDescription,
-    SensorStateClass,
-)
-
 
 from .const import DOMAIN
 
@@ -92,6 +91,10 @@ async def async_setup_entry(
                 sensors.append(
                     MinVwEntity(vehicle, "EVHVBattTemp", True, _connectedcarsclient)
                 )
+            if "RangeTotal" in vehicle["has"]:
+                sensors.append(
+                    MinVwEntity(vehicle, "Range", False, _connectedcarsclient)
+                )
             if "Speed" in vehicle["has"]:
                 sensors.append(
                     MinVwEntity(vehicle, "Speed", True, _connectedcarsclient)
@@ -126,9 +129,10 @@ async def async_setup_entry(
         raise PlatformNotReady from err
 
     # Build array with devices to keep
-    devices = []
-    for vehicle in data:
-        devices.append((DOMAIN, vehicle["vin"]))
+    devices = [(DOMAIN, vehicle["vin"]) for vehicle in data]
+    # devices = []
+    # for vehicle in data:
+    #    devices.append((DOMAIN, vehicle["vin"]))
 
     # Remove devices no longer reported
     device_registry = dr.async_get(hass)
@@ -162,7 +166,8 @@ class MinVwEntity(SensorEntity):
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
         self._entity_registry_enabled_default = entity_registry_enabled_default
-        self._dict = dict()
+        self._dict = {}
+        self._updated = None
 
         if self._itemName == "outdoorTemperature":
             self._unit = UnitOfTemperature.CELSIUS
@@ -197,6 +202,10 @@ class MinVwEntity(SensorEntity):
             self._unit = UnitOfTemperature.CELSIUS
             self._icon = "mdi:thermometer"
             self._device_class = SensorDeviceClass.TEMPERATURE
+        elif self._itemName == "Range":
+            self._unit = UnitOfLength.KILOMETERS
+            self._icon = "mdi:map-marker-distance"
+            self._device_class = SensorDeviceClass.DISTANCE
         elif self._itemName == "Speed":
             self._unit = UnitOfSpeed.KILOMETERS_PER_HOUR
             self._icon = "mdi:speedometer"
@@ -222,6 +231,7 @@ class MinVwEntity(SensorEntity):
 
     @property
     def device_info(self):
+        """Device info."""
         return {
             "identifiers": {
                 # Serial numbers are unique identifiers within a specific domain
@@ -245,10 +255,12 @@ class MinVwEntity(SensorEntity):
 
     @property
     def entity_registry_enabled_default(self):
+        """Enabled by default."""
         return self._entity_registry_enabled_default
 
     @property
     def icon(self):
+        """Icon."""
         return self._icon
 
     @property
@@ -263,21 +275,26 @@ class MinVwEntity(SensorEntity):
 
     @property
     def available(self):
+        """Availability."""
         return self._state is not None
 
     @property
     def device_class(self):
+        """Device class."""
         return self._device_class
 
     @property
     def extra_state_attributes(self):
         """Return state attributes."""
-        attributes = dict()
+        attributes = {}
         # attributes['state_class'] = self._state_class
         #        if self._device_class is not None:
         #            attributes['device_class'] = self._device_class
-        for key in self._dict:
-            attributes[key] = self._dict[key]
+        if self._updated is not None:
+            attributes["Updated"] = self._updated
+        attributes.update(self._dict)
+        # for key in self._dict:
+        #    attributes[key] = self._dict[key]
         return attributes
 
     @property
@@ -292,6 +309,7 @@ class MinVwEntity(SensorEntity):
 
     async def async_update(self):
         """Fetch new state data for the sensor.
+
         This is the only method that should fetch new data for Home Assistant.
         """
         # _LOGGER.debug(f"Setting status for {self._name}")
@@ -300,21 +318,36 @@ class MinVwEntity(SensorEntity):
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["outdoorTemperatures", 0, "celsius"]
             )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["outdoorTemperatures", 0, "time"]
+            )
         if self._itemName == "BatteryVoltage":
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["latestBatteryVoltage", "voltage"]
+            )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["latestBatteryVoltage", "time"]
             )
         if self._itemName == "fuelPercentage":
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["fuelPercentage", "percent"]
             )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["fuelPercentage", "time"]
+            )
         if self._itemName == "fuelLevel":
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["fuelLevel", "liter"]
             )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["fuelLevel", "time"]
+            )
         if self._itemName == "odometer":
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["odometer", "odometer"]
+            )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["odometer", "time"]
             )
         if self._itemName == "NextServicePredicted":
             self._state = (
@@ -329,11 +362,12 @@ class MinVwEntity(SensorEntity):
             self._dict["Direction"] = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["position", "direction"]
             )
-            # direction = self._dict["Direction"]
-            # _LOGGER.debug(f"Speed: {self._state} km/h, direction: {direction}")
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["position", "time"]
+            )
         if self._itemName == "mileage latest year" and (
             self._data_date is None
-            or datetime.utcnow() >= self._data_date + timedelta(hours=1)
+            or datetime.now(UTC) >= self._data_date + timedelta(hours=1)
         ):
             (
                 self._state,
@@ -342,10 +376,10 @@ class MinVwEntity(SensorEntity):
                 self._vehicle["id"], False
             )
             if self._state is not None:
-                self._data_date = datetime.utcnow()
+                self._data_date = datetime.now(UTC)
         if self._itemName == "mileage latest month" and (
             self._data_date is None
-            or datetime.utcnow() >= self._data_date + timedelta(hours=1)
+            or datetime.now(UTC) >= self._data_date + timedelta(hours=1)
         ):
             (
                 self._state,
@@ -354,7 +388,7 @@ class MinVwEntity(SensorEntity):
                 self._vehicle["id"], True
             )
             if self._state is not None:
-                self._data_date = datetime.utcnow()
+                self._data_date = datetime.now(UTC)
         if self._itemName == "mileage since refuel":
             self._state = None
 
@@ -450,6 +484,10 @@ class MinVwEntity(SensorEntity):
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["chargePercentage", "pct"]
             )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["chargePercentage", "time"]
+            )
+
             batlevel = round(self._state / 10) * 10
             if batlevel == 100:
                 self._icon = "mdi:battery"
@@ -461,9 +499,20 @@ class MinVwEntity(SensorEntity):
             self._state = await self._connectedcarsclient.get_value(
                 self._vehicle["id"], ["highVoltageBatteryTemperature", "celsius"]
             )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["highVoltageBatteryTemperature", "time"]
+            )
+        if self._itemName == "Range":
+            self._state = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["rangeTotalKm", "km"]
+            )
+            self._updated = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["rangeTotalKm", "time"]
+            )
 
 
 def is_date_valid(date) -> bool:
+    """Check date validity."""
     valid_date = True
     try:
         valid_date = (

@@ -1,16 +1,16 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
-import logging
 from datetime import timedelta
+import logging
 import traceback
 
 from homeassistant import config_entries, core
-from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
-)  # ,  BinarySensorEntityDescription
+from homeassistant.components.binary_sensor import BinarySensorEntity
+
+# ,  BinarySensorEntityDescription
 from homeassistant.exceptions import PlatformNotReady
 
-from .const import DOMAIN, CONF_HEALTH_SENSITIVITY
+from .const import CONF_HEALTH_SENSITIVITY, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +81,7 @@ class CcBinaryEntity(BinarySensorEntity):
         connectedcarsclient,
         sensitivity=None,
     ) -> None:
+        """Initialize the sensor."""
         self._vehicle = vehicle
         self._itemName = itemName
         self._subitemName = subitemName
@@ -92,11 +93,13 @@ class CcBinaryEntity(BinarySensorEntity):
         self._sensitivity = sensitivity
         self._is_on = None
         self._entity_registry_enabled_default = entity_registry_enabled_default
-        self._dict = dict()
+        self._dict = {}
+        self._updated = None
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
     @property
     def device_info(self):
+        """Device info."""
         return {
             "identifiers": {(DOMAIN, self._vehicle["vin"])},
             "name": f"{self._vehicle['make']} {self._vehicle['model']}",  # self._vehicle["name"],
@@ -117,6 +120,7 @@ class CcBinaryEntity(BinarySensorEntity):
 
     @property
     def entity_registry_enabled_default(self):
+        """Enabled by default."""
         return self._entity_registry_enabled_default
 
     # @property
@@ -136,22 +140,26 @@ class CcBinaryEntity(BinarySensorEntity):
 
     @property
     def is_on(self):
+        """State."""
         return self._is_on
 
     @property
     def available(self):
+        """Availability."""
         return self._is_on is not None
 
     @property
     def device_class(self):
+        """Device class."""
         return self._device_class
 
     @property
     def extra_state_attributes(self):
         """Return state attributes."""
-        attributes = dict()
-        for key, value in self._dict.items():
-            attributes[key] = value
+        attributes = {}
+        if self._updated is not None:
+            attributes["Updated"] = self._updated
+        attributes.update(self._dict)
         return attributes
 
     async def async_update(self):
@@ -166,6 +174,9 @@ class CcBinaryEntity(BinarySensorEntity):
                         )
                     ).lower()
                     == "true"
+                )
+                self._updated = await self._connectedcarsclient.get_value(
+                    self._vehicle["id"], ["ignition", "time"]
                 )
             elif self._itemName == "Health":
                 # self._is_on = (
@@ -182,19 +193,16 @@ class CcBinaryEntity(BinarySensorEntity):
                 self._is_on = self.evaluate_health()
 
             elif self._itemName == "Lamp":
-                self._is_on = (
-                    str(
-                        await self._connectedcarsclient.get_lampstatus(
-                            self._vehicle["id"], self._subitemName
-                        )
-                    ).lower()
-                    == "true"
+                enabled, self._updated = await self._connectedcarsclient.get_lampstatus(
+                    self._vehicle["id"], self._subitemName
                 )
+                self._is_on = str(enabled).lower() == "true"
 
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Unable to get binary state: %s", err)
 
     def evaluate_health(self):
+        """Evaluate health."""
         ret = False
         for lead in self._dict["Leads"]:
             if "type" in lead and lead["type"] is not None:

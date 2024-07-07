@@ -1,13 +1,13 @@
 """Wrapper for connectedcars.io."""
 
+import asyncio
+from datetime import UTC, datetime, timedelta
+import json
 import logging
 import traceback
-import asyncio
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
-import aiohttp
-import json
 
+import aiohttp
+from dateutil.relativedelta import relativedelta
 
 # import hashlib
 
@@ -18,11 +18,10 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class MinVW:
-    """
-    Primary exported interface for connectedcars.io API wrapper.
-    """
+    """Primary exported interface for connectedcars.io API wrapper."""
 
     def __init__(self, email, password, namespace) -> None:
+        """Initialize."""
         self._email = email
         self._password = password
         self._namespace = namespace
@@ -47,7 +46,7 @@ class MinVW:
         return ret
 
     async def api_request(self, req_param):
-        """Make an API request for data"""
+        """Make an API request for data."""
         ret = None
 
         try:
@@ -63,16 +62,27 @@ class MinVW:
                 req_body = {"query": req_param}
                 req_url = self._base_url_graph + "graphql"
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        req_url, json=req_body, headers=headers
-                    ) as response:
-                        if response.ok:
-                            ret = await response.json()
-                        else:
-                            _LOGGER.warning(
-                                "Unexpected response: %s", await response.read()
-                            )
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(req_url, json=req_body, headers=headers) as response,
+                ):
+                    if response.ok:
+                        ret = await response.json()
+                    else:
+                        _LOGGER.warning(
+                            "Unexpected response: %s", await response.read()
+                        )
+
+                # async with aiohttp.ClientSession() as session:
+                #     async with session.post(
+                #         req_url, json=req_body, headers=headers
+                #     ) as response:
+                #         if response.ok:
+                #             ret = await response.json()
+                #         else:
+                #             _LOGGER.warning(
+                #                 "Unexpected response: %s", await response.read()
+                #             )
 
         except aiohttp.ClientConnectionError as err:
             _LOGGER.warning("Connection error: %s", str(err))
@@ -83,25 +93,27 @@ class MinVW:
     async def get_latest_years_mileage(self, vehicle_id, latest_month):
         """Get mileage for latest year or month."""
         ret = None
-        att = dict()
+        att = {}
 
         req_param = """query YearlyMileage {
   vehicle(id: %s) {
 
-    totalTripStatistics(period: {first: "%sZ", last: "%sZ"} ) {mileageInKm, driveDurationInMinutes, numberTrips, longestMileageInKm}
+    totalTripStatistics(period: {first: "%s", last: "%s"} ) {mileageInKm, driveDurationInMinutes, numberTrips, longestMileageInKm}
   }
 }
         """
 
-        date = datetime.utcnow()
+        date = datetime.now(UTC)  # datetime.utcnow()
         time_delta = relativedelta(years=-1)
         if latest_month:
             time_delta = relativedelta(months=-1)
 
         req_param = req_param % (
             vehicle_id,
-            (date + time_delta).isoformat(timespec="milliseconds"),
-            date.isoformat(timespec="milliseconds"),
+            (date + time_delta)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            date.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         )
 
         vehicle_data = await self.api_request(req_param)
@@ -181,7 +193,7 @@ class MinVW:
     #         return ret, att
 
     async def get_trip_at_time(self, vehicle_id, isotime):
-        """Get trip at a specific time"""
+        """Get trip at a specific time."""
         trip = None
 
         req_param = """query fuel {
@@ -295,9 +307,11 @@ class MinVW:
     #         return ret, att
 
     def has_value(self, obj, key) -> bool:
-        return key in obj.keys() and obj[key] is not None
+        """Check if object has key."""
+        return key in obj and obj[key] is not None
 
     def obj_copy_attributes(self, obj_src, obj_dst, keys):
+        """Copy attributes."""
         if obj_src is not None and obj_dst is not None:
             for key in keys:
                 if self.has_value(obj_src, key):
@@ -333,9 +347,9 @@ class MinVW:
                         )
                         # Value
                         if self.has_value(lead, "value"):
-                            element[
-                                "value"
-                            ] = f"{lead['value']['amount']} {lead['value']['currency']}"
+                            element["value"] = (
+                                f"{lead['value']['amount']} {lead['value']['currency']}"
+                            )
 
                         # Context - Type specific info
                         if self.has_value(lead, "context"):
@@ -363,9 +377,9 @@ class MinVW:
                             # Remove emply values in context
                             remove_keys = []
                             if element["context"] is not None:
-                                for key in element["context"].keys():
+                                for key in element["context"]:
                                     if element["context"][key] is None:
-                                        _LOGGER.debug("Ket to remove: %s", key)
+                                        _LOGGER.debug("Key to remove: %s", key)
                                         remove_keys.append(key)
                             for key in remove_keys:
                                 element["context"].pop(key)
@@ -382,13 +396,12 @@ class MinVW:
         return ret
 
     async def get_value_float(self, vehicle_id, selector):
-        """Extract a float value from read data"""
+        """Extract a float value from read data."""
         ret = None
         data = await self.get_value(vehicle_id, selector)
         if isinstance(data, str):  # type(data) == str
             ret = float(data)
-        # type(data) == float or type(data) == int:
-        if isinstance(data, float) or isinstance(data, int):
+        if isinstance(data, (float, int)):
             ret = data
         return ret
 
@@ -405,7 +418,6 @@ class MinVW:
 
     def _get_vehicle_value(self, vehicle, selector):
         """Get selected attribures in vehicle data."""
-        ret = None
         obj = vehicle
         for sel in selector:
             if (obj is not None) and (
@@ -418,12 +430,12 @@ class MinVW:
                 # Object does not have specified selector(s)
                 obj = None
                 break
-        ret = obj
-        return ret
+        return obj
 
-    async def get_lampstatus(self, vehicle_id, lamptype):
+    async def get_lampstatus(self, vehicle_id, lamptype) -> tuple[str, str]:
         """Get status of warning lamps."""
         ret = None
+        time = None
         data = await self._get_vehicle_data()
         # vehicles = []
         for item in data["data"]["viewer"]["vehicles"]:
@@ -434,8 +446,9 @@ class MinVW:
                     # print(lamp)
                     if lamp["type"] == lamptype:
                         ret = lamp["enabled"]
+                        time = lamp["time"]
                         break
-        return ret
+        return ret, time
 
     async def _get_voltage(self, vehicle_id):
         ret = None
@@ -455,9 +468,9 @@ class MinVW:
             vehicle_id = vehicle["id"]
 
             # Find lamps for this vehicle
-            lampstates = []
-            for lamp in vehicle["lampStates"]:
-                lampstates.append(lamp["type"])
+            lampstates = [lamp["type"] for lamp in vehicle["lampStates"]]
+            # for lamp in vehicle["lampStates"]:
+            #    lampstates.append(lamp["type"])
 
             # Find data availability for sensors
             has = []
@@ -496,6 +509,8 @@ class MinVW:
                 is not None
             ):
                 has.append("EVHVBattTemp")
+            if self._get_vehicle_value(vehicle, ["rangeTotalKm", "km"]) is not None:
+                has.append("RangeTotal")
 
             if self._get_vehicle_value(vehicle, ["ignition", "on"]) is not None:
                 has.append("Ignition")
@@ -522,21 +537,21 @@ class MinVW:
             if include_additional_parameters:
                 req_param = """query AdditionalParameters {
 vehicle(id: %s) {
-    totalTripStatistics(period: {first: "%sZ", last: "%sZ"}) {mileageInKm, driveDurationInMinutes, numberTrips, longestMileageInKm}
+    totalTripStatistics(period: {first: "%s", last: "%s"}) {mileageInKm, driveDurationInMinutes, numberTrips, longestMileageInKm}
     serverCalcGpsOdometers(limit: 1, order: DESC){odometer, time}
     trips(last: 1){items{mileage, gpsMileage, odometerMileage, startOdometer, endOdometer, startTime, endTime, time}}
 }}
                 """
                 #     refuelEvents(limit: 1) {time, litersAfter, litersBefore}
 
-                date = datetime.utcnow()
+                date = datetime.now(UTC)  # datetime.utcnow()
 
                 req_param = req_param % (
                     vehicle_id,
-                    (date + relativedelta(months=-2)).isoformat(
-                        timespec="milliseconds"
-                    ),
-                    date.isoformat(timespec="milliseconds"),
+                    (date + relativedelta(months=-2))
+                    .isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z"),
+                    date.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 )
 
                 vehicle_data = await self.api_request(req_param)
@@ -589,7 +604,7 @@ vehicle(id: %s) {
             if (
                 self._data_expires is None
                 or self._data is None
-                or datetime.utcnow() > self._data_expires
+                or datetime.now(UTC) > self._data_expires
             ):
                 self._data_expires = None
                 self._data = None
@@ -601,6 +616,7 @@ vehicle(id: %s) {
       vehicle {
         odometer {
           odometer
+          time
         }
         odometerOffset
         id
@@ -639,6 +655,7 @@ vehicle(id: %s) {
           celsius
           time
         }
+        rangeTotalKm { km time }
         ignition {
           time
           on
@@ -661,6 +678,7 @@ vehicle(id: %s) {
           longitude
           speed
           direction
+          time
         }
         service {
           predictedDate
@@ -732,34 +750,34 @@ vehicle(id: %s) {
 
                 req_url = self._base_url_graph + "graphql"
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        req_url, json=req_body, headers=headers
-                    ) as response:
-                        self._data = await response.json()
-                        # self._data = json.loads('')
-                        _LOGGER.debug("Got vehicle data: %s", json.dumps(self._data))
+                # async with aiohttp.ClientSession() as session:
+                #     async with session.post(
+                #         req_url, json=req_body, headers=headers
+                #     ) as response:
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(req_url, json=req_body, headers=headers) as response,
+                ):
+                    self._data = await response.json()
+                    # self._data = json.loads('')
+                    _LOGGER.debug("Got vehicle data: %s", json.dumps(self._data))
 
-                        # Does any car have ignition?
-                        expire_time = 4.75
-                        for item in self._data["data"]["viewer"]["vehicles"]:
-                            vehicle = item["vehicle"]
-                            # id = vehicle["id"]
-                            ignition = self._get_vehicle_value(
-                                vehicle, ["ignition", "on"]
-                            )  # Preferred to check this only, but it seems to be delayed
-                            speed = self._get_vehicle_value(
-                                vehicle, ["position", "speed"]
-                            )
-                            speed = speed if speed is not None else 0
-                            if bool(ignition) is True or speed > 0:  # ignition == True
-                                expire_time = (
-                                    0.75  # At least one car has ignition/moving
-                                )
-                                break
-                        self._data_expires = datetime.utcnow() + timedelta(
-                            minutes=expire_time
-                        )
+                    # Does any car have ignition?
+                    expire_time = 4.75
+                    for item in self._data["data"]["viewer"]["vehicles"]:
+                        vehicle = item["vehicle"]
+                        # id = vehicle["id"]
+                        ignition = self._get_vehicle_value(
+                            vehicle, ["ignition", "on"]
+                        )  # Preferred to check this only, but it seems to be delayed
+                        speed = self._get_vehicle_value(vehicle, ["position", "speed"])
+                        speed = speed if speed is not None else 0
+                        if bool(ignition) is True or speed > 0:  # ignition == True
+                            expire_time = 0.75  # At least one car has ignition/moving
+                            break
+                    self._data_expires = datetime.now(UTC) + timedelta(
+                        minutes=expire_time
+                    )
 
                 # result = requests.post(req_url, json = req_body, headers = headers)
                 # print(result)
@@ -780,7 +798,7 @@ vehicle(id: %s) {
         if (
             self._accesstoken is None
             or self._at_expires is None
-            or datetime.utcnow() > self._at_expires
+            or datetime.now(UTC) > self._at_expires
         ):
             headers = {
                 "Content-Type": "application/json",
@@ -800,11 +818,16 @@ vehicle(id: %s) {
 
                 auth_url = self._base_url_auth + "auth/login/email/password"
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        auth_url, json=body, headers=headers
-                    ) as response:
-                        result_json = await response.json()
+                # async with aiohttp.ClientSession() as session:
+                #     async with session.post(
+                #         auth_url, json=body, headers=headers
+                #     ) as response:
+                #         result_json = await response.json()
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(auth_url, json=body, headers=headers) as response,
+                ):
+                    result_json = await response.json()
 
                 # result = await requests.post(auth_url, json = body, headers = headers)
                 # result_json = result.json()
@@ -816,7 +839,7 @@ vehicle(id: %s) {
                     and "expires" in result_json
                 ):
                     self._accesstoken = result_json["token"]
-                    self._at_expires = datetime.utcnow() + timedelta(
+                    self._at_expires = datetime.now(UTC) + timedelta(
                         seconds=int(result_json["expires"]) - 120
                     )
                     _LOGGER.debug("Got access token: %s...", self._accesstoken[:10])

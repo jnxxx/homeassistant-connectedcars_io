@@ -1,7 +1,7 @@
 """Support for connectedcars.io / Min Volkswagen integration."""
 
+from datetime import datetime, timedelta
 import logging
-from datetime import timedelta, datetime
 import traceback
 
 from homeassistant import config_entries, core
@@ -51,6 +51,7 @@ class CcTrackerEntity(TrackerEntity):
         self._name = (
             f"{self._vehicle['make']} {self._vehicle['model']} {self._itemName}"
         )
+        """Initialize."""
         self._unique_id = f"{DOMAIN}-{self._vehicle['vin']}-{self._itemName}"
         self._device_class = None
         self._connectedcarsclient = connectedcarsclient
@@ -58,10 +59,12 @@ class CcTrackerEntity(TrackerEntity):
         self._longitude = None
         self._cached_location = None
         self._cached_time = None
+        self._updated = None
         _LOGGER.debug("Adding sensor: %s", self._unique_id)
 
     @property
     def device_info(self):
+        """Device info."""
         return {
             "identifiers": {
                 # Serial numbers are unique identifiers within a specific domain
@@ -94,6 +97,7 @@ class CcTrackerEntity(TrackerEntity):
 
     @property
     def source_type(self) -> str:
+        """Source type."""
         return "gps"
 
     # @property
@@ -102,18 +106,22 @@ class CcTrackerEntity(TrackerEntity):
 
     @property
     def latitude(self):
+        """Latitude."""
         return self._latitude
 
     @property
     def longitude(self):
+        """Longitude."""
         return self._longitude
 
     @property
     def available(self):
+        """Availability."""
         return self._latitude is not None and self._longitude is not None
 
     @property
     def device_class(self):
+        """Device class."""
         return self._device_class
 
     @property
@@ -142,8 +150,10 @@ class CcTrackerEntity(TrackerEntity):
 
     @property
     def extra_state_attributes(self):
-        attributes = dict()
-        # attributes['device_class'] = self._device_class
+        """Return state attributes."""
+        attributes = {}
+        if self._updated is not None:
+            attributes["Updated"] = self._updated
         return attributes
 
     async def async_update(self):
@@ -175,11 +185,15 @@ class CcTrackerEntity(TrackerEntity):
             longitude = await self._connectedcarsclient.get_value_float(
                 self._vehicle["id"], ["position", "longitude"]
             )
+            postime = await self._connectedcarsclient.get_value(
+                self._vehicle["id"], ["position", "time"]
+            )
             position = tuple((latitude, longitude))
 
             if ignition:
                 self._cached_location = None
                 self._cached_time = None
+                self._updated = postime
             else:
                 if (
                     self._cached_location is None
@@ -189,6 +203,7 @@ class CcTrackerEntity(TrackerEntity):
                 ):
                     self._cached_location = position
                     self._cached_time = ignition_time
+                    self._updated = postime
                     _LOGGER.debug("position: %s", position)
                 else:
                     position = self._cached_location
@@ -202,6 +217,7 @@ class CcTrackerEntity(TrackerEntity):
 
 
 def is_date_valid(date) -> bool:
+    """Check if date is valid."""
     valid_date = True
     try:
         valid_date = (

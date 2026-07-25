@@ -302,8 +302,23 @@ _MAP_HTML = """<!DOCTYPE html>
     padding: 8px 10px; max-height: 55%; overflow: auto;
     font-size: 12px; line-height: 1.45; max-width: 46%;
     box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    opacity: 1;
+    transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
   }
-  .legend h1 { font-size: 12px; margin: 0 0 4px; font-weight: 600; }
+  .legend h1 { font-size: 12px; margin: 0 0 5px; font-weight: 600; cursor: pointer; }
+  #legend.collapsed {
+    max-height: 1.2em !important;
+    opacity: 0.95;
+  }
+  #legend h1 #idCollapse {
+    display: inline-block;
+    user-select: none;
+    margin-right: 6px;
+    transition: transform 0.3s ease-in-out; /* Smooth rotation */
+  }
+  #legend.collapsed h1 #idCollapse {
+    transform: rotate(-90deg); /* Rotates ▼ to point right (▶) */
+  }
   .ranges, .custom { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; }
   .ranges button, .custom button {
     font: inherit; font-size: 11px; color: var(--text-secondary);
@@ -349,7 +364,8 @@ _MAP_HTML = """<!DOCTYPE html>
 const DATA = __PAYLOAD__;
 const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-const map = L.map("map", { zoomControl: true });
+const map = L.map("map", { zoomControl: false });
+L.control.zoom({ position: 'topright' }).addTo(map);
 L.tileLayer(
   dark
     ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -373,7 +389,29 @@ const headline = sel.days != null
   ? "ture, seneste " + sel.days + " dage"
   : "ture, " + fmtDay(sel.from) + " – " + (sel.to ? fmtDay(sel.to) : "nu");
 const legend = document.getElementById("legend");
-legend.innerHTML = "<h1>" + (DATA.vehicle || "Bil") + " · " + headline + "</h1>";
+
+const collapseBtn = document.createElement('span');
+collapseBtn.id = 'idCollapse';
+collapseBtn.style.userSelect = 'none';
+
+// Check stored state
+const CollapseStorageKey = 'connectedcars_trips_map_legend_collapsed';
+const isCollapsed = localStorage.getItem(CollapseStorageKey) === 'true';
+collapseBtn.textContent = '▼';
+if (isCollapsed) legend.classList.add('collapsed');
+
+// Create text node for title
+const vehicle = DATA.vehicle || "Bil";
+const titleText = document.createTextNode(` ${vehicle} · ${headline}`);
+const legendh1 = document.createElement('h1');
+legendh1.addEventListener('click', function() {
+  const isCollapsed = legend.classList.toggle('collapsed');
+  localStorage.setItem(CollapseStorageKey, isCollapsed ? 'true' : 'false');
+});
+legendh1.appendChild(collapseBtn);
+legendh1.appendChild(titleText);
+legend.appendChild(legendh1);
+
 
 const ranges = document.createElement("div");
 ranges.className = "ranges";

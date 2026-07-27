@@ -63,7 +63,21 @@ EVENT_NAMES_DA = {
 }
 SEVERITY_NAMES_DA = {"high": "kraftig", "medium": "middel", "low": "let"}
 
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off"}
 
+
+def _parse_bool(value, default=True):
+    """Query flag to bool; missing or unrecognised falls back to default."""
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    return default
+    
 def _parse_ts(value):
     """ISO-8601 string to epoch seconds, or None."""
     if not value:
@@ -73,14 +87,12 @@ def _parse_ts(value):
     except ValueError:
         return None
 
-
 def _parse_day(value):
     """YYYY-MM-DD string to an aware UTC datetime, or None."""
     try:
         return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
     except (TypeError, ValueError):
         return None
-
 
 def _api_iso(dt):
     """Datetime to the API's ISO-8601 Zulu format."""
@@ -146,7 +158,7 @@ def _trip_path(trip):
     return path
 
 
-def build_payload(vehicle, trips, selection):
+def build_payload(vehicle, trips, selection, show_legend=True):
     """JSON-serializable payload embedded in the map page.
 
     selection is {"days": int|None, "from": "YYYY-MM-DD"|None, "to": ...} —
@@ -171,7 +183,7 @@ def build_payload(vehicle, trips, selection):
                 "events": _event_positions(trip),
             }
         )
-    return {"vehicle": vehicle.get("name"), "selection": selection, "trips": out}
+    return {"vehicle": vehicle.get("name"), "selection": selection, "showLegend": show_legend, "trips": out}
 
 
 def async_ensure_map_token(hass, entry):
@@ -215,6 +227,7 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
         except ValueError:
             return web.Response(status=400, text="Bad days/limit")
         vin = request.query.get("vin")
+        show_legend = _parse_bool(request.query.get("legend"), True)
 
         # A from/to date range takes precedence over the days preset.
         from_q = request.query.get("from")
@@ -255,7 +268,7 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
             )
             or []
         )
-        payload = build_payload(vehicle, trips, selection)
+        payload = build_payload(vehicle, trips, selection, show_legend)
         return web.Response(
             text=render_map_html(payload),
             content_type="text/html",
@@ -363,9 +376,10 @@ _MAP_HTML = """<!DOCTYPE html>
 "use strict";
 const DATA = __PAYLOAD__;
 const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+const showLegend = DATA.showLegend !== false;
 
-const map = L.map("map", { zoomControl: false });
-L.control.zoom({ position: 'topright' }).addTo(map);
+const map = L.map("map", { zoomControl: !showLegend });
+if (showLegend) L.control.zoom({ position: 'topright' }).addTo(map);
 L.tileLayer(
   dark
     ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -389,6 +403,7 @@ const headline = sel.days != null
   ? "ture, seneste " + sel.days + " dage"
   : "ture, " + fmtDay(sel.from) + " – " + (sel.to ? fmtDay(sel.to) : "nu");
 const legend = document.getElementById("legend");
+if (!showLegend) legend.remove();
 
 const collapseBtn = document.createElement('span');
 collapseBtn.id = 'idCollapse';

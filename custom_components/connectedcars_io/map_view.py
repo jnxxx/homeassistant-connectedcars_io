@@ -323,6 +323,9 @@ _MAP_HTML = """<!DOCTYPE html>
     max-height: 1.2em !important;
     opacity: 0.95;
   }
+  #legend.preload, #legend.preload * {
+    transition: none !important;
+  }
   #legend h1 #idCollapse {
     display: inline-block;
     user-select: none;
@@ -403,6 +406,7 @@ const headline = sel.days != null
   ? "ture, seneste " + sel.days + " dage"
   : "ture, " + fmtDay(sel.from) + " – " + (sel.to ? fmtDay(sel.to) : "nu");
 const legend = document.getElementById("legend");
+legend.classList.add('preload');
 if (!showLegend) legend.remove();
 
 const collapseBtn = document.createElement('span');
@@ -537,6 +541,12 @@ const note = document.createElement("div");
 note.className = "muted";
 note.textContent = "A: acceleration · B: opbremsning · F: fart · S: sving";
 legend.appendChild(note);
+
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    legend.classList.remove('preload');
+  });
+});
 </script>
 </body>
 </html>

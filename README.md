@@ -111,7 +111,7 @@ url: /api/connectedcars_io/trips_map/<token>?days=7
 aspect_ratio: 75%
 ```
 
-Query parameters: `days` (default 7), `from`/`to` (`YYYY-MM-DD`, a custom date range that overrides `days`), `limit` (default 8, max 200 — the 8 newest trips get distinct colours, older ones render gray), `vin` (with multiple cars). The page itself has preset buttons (7/30/90/365 days) and a custom from–to date picker; it shows the total km for the selected span.
+Query parameters: `days` (default 7), `from`/`to` (`YYYY-MM-DD`, a custom date range that overrides `days`), `limit` (default 8, max 200 — the 8 newest trips get distinct colours, older ones render gray), `legend` (`true`/`false` or `1`/`0`, default true — set to false for a clean map with just the routes), `vin` (with multiple cars). The page itself has preset buttons (7/30/90/365 days) and a custom from–to date picker; it shows the total km for the selected span. With `legend=false` the panel and its controls are left out entirely and the map fills the frame, which suits small dashboard cards.
 
 ## Debugging
 It is possible to debug log the raw response from the API. This is done by setting up logging like below in configuration.yaml in Home Assistant. It is also possible to set the log level through a service call in UI.  

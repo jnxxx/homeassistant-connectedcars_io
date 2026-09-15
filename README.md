@@ -113,6 +113,17 @@ aspect_ratio: 75%
 
 Query parameters: `days` (default 7), `from`/`to` (`YYYY-MM-DD`, a custom date range that overrides `days`), `limit` (default 8, max 200 — the 8 newest trips get distinct colours, older ones render gray), `legend` (`true`/`false` or `1`/`0`, default true — set to false for a clean map with just the routes), `vin` (with multiple cars). The page itself has preset buttons (7/30/90/365 days) and a custom from–to date picker; it shows the total km for the selected span. With `legend=false` the panel and its controls are left out entirely and the map fills the frame, which suits small dashboard cards.
 
+### Base map
+The routes are drawn on the same base map Home Assistant's own map card uses. On 2026.9 and later that means MapLibre rendering the OpenStreetMap vector tiles the core `map_tiles` proxy serves, with Home Assistant's own light and dark styles, so the trip map and the built-in map look alike. CARTO is gone: it started stamping "API KEY REQUIRED" into tiles fetched without a key, which is what turned the map into a watermarked mess.
+
+Two fallbacks sit behind that, both matching what the frontend does. Without WebGL2 the page drops to the proxy's raster tiles and filters them for dark mode. On cores older than 2026.9 there is no proxy at all, so it loads OpenStreetMap raster tiles directly.
+
+Worth knowing about the vector map: its source stops at zoom 14 and Home Assistant's proxy enforces that, so zooming past it magnifies the same geometry rather than revealing more. The raster fallback goes to zoom 19 and keeps adding detail. If you care more about street-level detail than about matching the built-in map, that is the trade you are making.
+
+The map follows your theme while it is open. When the system switches between light and dark the base map restyles and the routes repaint with it.
+
+One security note: because the map page is deliberately unauthenticated, it also hands out the core's rotating tile token to whoever holds the map URL. That token only fetches map tiles through your instance and expires within the hour. Treat the map URL as the secret it is, and regenerate it by removing and re-adding the integration if it leaks.
+
 ## Debugging
 It is possible to debug log the raw response from the API. This is done by setting up logging like below in configuration.yaml in Home Assistant. It is also possible to set the log level through a service call in UI.  
 

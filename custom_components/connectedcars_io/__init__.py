@@ -12,7 +12,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_HEALTH_SENSITIVITY, DOMAIN
 from .connectedcars import ConnectedCarsClient
-from .map_view import ConnectedCarsTripsMapView, async_ensure_map_token
+from .map_view import (
+    ConnectedCarsMapTileTokenView,
+    ConnectedCarsTripsMapView,
+    async_ensure_map_token,
+)
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["binary_sensor", "device_tracker", "sensor"]
@@ -113,6 +117,7 @@ async def async_setup_entry(
 
     if not hass.data.get(f"{DOMAIN}_map_view_registered"):
         hass.http.register_view(ConnectedCarsTripsMapView(hass))
+        hass.http.register_view(ConnectedCarsMapTileTokenView(hass))
         hass.data[f"{DOMAIN}_map_view_registered"] = True
 
     # Registers update listener to update config entry when options are updated, and store a reference to the unsubscribe function

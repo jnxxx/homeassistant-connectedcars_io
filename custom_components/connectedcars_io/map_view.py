@@ -22,6 +22,24 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_COLORED_TRIPS = 8  # categorical palette slots; older trips render neutral
 
+# The core map_tiles proxy (HA 2026.9+) publishes its rotating access token in
+# hass.data under its own domain. Looked up rather than imported, so this module
+# still loads on older cores, which fall back to OSM directly.
+MAP_TILES_DOMAIN = "map_tiles"
+MAP_TILES_RASTER_URL = "/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}"
+OSM_RASTER_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+# Vector styles the frontend ships next to the proxy. They already point at the
+# /api/map_tiles endpoints, so the page only has to add the token.
+MAP_STYLE_LIGHT = "/static/map/light.json"
+MAP_STYLE_DARK = "/static/map/dark.json"
+OSM_ATTRIBUTION = (
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    " contributors"
+)
+MIN_MAP_ZOOM = 1  # Leaflet zoom 0 drives the MapLibre adapter to -1
+MAX_MAP_ZOOM = 20  # MapLibre overzooms the vector source rather than stop at it
+MAX_RASTER_ZOOM = 19  # OSM serves no raster past this
+
 # Categorical palette (light/dark mode steps) and status colors for event
 # severity. Validated with the dataviz palette validator against the map tile
 # surfaces; identity never rides on color alone (legend + letter glyphs).
@@ -99,6 +117,49 @@ def _api_iso(dt):
     return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _client_for_token(hass, token):
+    """Client of the config entry whose map token matches, or None."""
+    if not token.isascii():  # compare_digest rejects non-ASCII input
+        return None
+    for config in hass.data.get(DOMAIN, {}).values():
+        candidate = config.get("map_token")
+        if candidate and secrets.compare_digest(candidate, token):
+            return config["connectedcarsclient"]
+    return None
+
+
+def _map_tiles_token(hass):
+    """Current access token of the core map tiles proxy, or None without one."""
+    tokens = hass.data.get(MAP_TILES_DOMAIN)
+    if not tokens:
+        return None
+    try:
+        return tokens[-1]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _tile_config(hass, map_token):
+    """Base map source for the page, and where to renew its token.
+
+    With the core proxy the page draws Home Assistant's own vector basemap and
+    keeps its raster tiles as the fallback. Without it there is neither, so the
+    page loads OpenStreetMap raster tiles directly.
+    """
+    tile_token = _map_tiles_token(hass)
+    return {
+        "url": MAP_TILES_RASTER_URL if tile_token else OSM_RASTER_URL,
+        "token": tile_token,
+        "tokenUrl": f"/api/connectedcars_io/trips_map/{map_token}/tile_token",
+        "styleLight": MAP_STYLE_LIGHT if tile_token else None,
+        "styleDark": MAP_STYLE_DARK if tile_token else None,
+        "attribution": OSM_ATTRIBUTION,
+        "minZoom": MIN_MAP_ZOOM,
+        "maxZoom": MAX_MAP_ZOOM,
+        "rasterMaxZoom": MAX_RASTER_ZOOM,
+    }
+
+
 def _event_positions(trip):
     """Attach coordinates to each detected event by time-interpolating the
     trip's GPS track."""
@@ -158,7 +219,7 @@ def _trip_path(trip):
     return path
 
 
-def build_payload(vehicle, trips, selection, show_legend=True):
+def build_payload(vehicle, trips, selection, tiles, show_legend=True):
     """JSON-serializable payload embedded in the map page.
 
     selection is {"days": int|None, "from": "YYYY-MM-DD"|None, "to": ...} —
@@ -183,7 +244,13 @@ def build_payload(vehicle, trips, selection, show_legend=True):
                 "events": _event_positions(trip),
             }
         )
-    return {"vehicle": vehicle.get("name"), "selection": selection, "showLegend": show_legend, "trips": out}
+    return {
+        "vehicle": vehicle.get("name"),
+        "selection": selection,
+        "showLegend": show_legend,
+        "tiles": tiles,
+        "trips": out,
+    }
 
 
 def async_ensure_map_token(hass, entry):
@@ -212,12 +279,7 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
 
     async def get(self, request, token):
         """Render the map page."""
-        client = None
-        for config in self.hass.data.get(DOMAIN, {}).values():
-            candidate = config.get("map_token")
-            if candidate and secrets.compare_digest(candidate, token):
-                client = config["connectedcarsclient"]
-                break
+        client = _client_for_token(self.hass, token)
         if client is None:
             return web.Response(status=404, text="Unknown map token")
 
@@ -268,10 +330,39 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
             )
             or []
         )
-        payload = build_payload(vehicle, trips, selection, show_legend)
+        payload = build_payload(
+            vehicle, trips, selection, _tile_config(self.hass, token), show_legend
+        )
         return web.Response(
             text=render_map_html(payload),
             content_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class ConnectedCarsMapTileTokenView(HomeAssistantView):
+    """Hand the map page a current base map token.
+
+    The core rotates it every 30 minutes and a dashboard stays open far longer,
+    so the page renews it here instead of reloading itself. It takes the same
+    map token that grants the page, and gives out nothing beyond the tiles that
+    page already draws.
+    """
+
+    url = "/api/connectedcars_io/trips_map/{token}/tile_token"
+    name = "api:connectedcars_io:trips_map:tile_token"
+    requires_auth = False
+
+    def __init__(self, hass) -> None:
+        """Initialize."""
+        self.hass = hass
+
+    async def get(self, request, token):
+        """Return the current base map token."""
+        if _client_for_token(self.hass, token) is None:
+            return web.Response(status=404, text="Unknown map token")
+        return web.json_response(
+            {"token": _map_tiles_token(self.hass)},
             headers={"Cache-Control": "no-store"},
         )
 
@@ -370,6 +461,20 @@ _MAP_HTML = """<!DOCTYPE html>
     background: var(--ring); border: 3px solid #000; box-sizing: border-box;
   }
   .leaflet-tooltip { font-family: inherit; }
+  /* Only the raster fallback needs this: OpenStreetMap ships one raster
+     style, so dark mode filters it, exactly as Home Assistant does. The vector
+     base map has its own dark style, and its canvas is not a .leaflet-tile. */
+  @media (prefers-color-scheme: dark) {
+    .leaflet-tile-pane .leaflet-tile {
+      filter: invert(0.9) hue-rotate(170deg) brightness(1.5) contrast(1.2) saturate(0.3);
+    }
+  }
+  .leaflet-container .leaflet-control-attribution {
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    border-radius: 6px 0 0 0;
+  }
+  .leaflet-container .leaflet-control-attribution a { color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -378,19 +483,290 @@ _MAP_HTML = """<!DOCTYPE html>
 <script>
 "use strict";
 const DATA = __PAYLOAD__;
-const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+const darkQuery = window.matchMedia
+  ? window.matchMedia("(prefers-color-scheme: dark)")
+  : null;
+let dark = Boolean(darkQuery && darkQuery.matches);
+let ring = dark ? "#1a1a19" : "#ffffff";
 const showLegend = DATA.showLegend !== false;
+const tileConfig = DATA.tiles;
 
-const map = L.map("map", { zoomControl: !showLegend });
+const map = L.map("map", {
+  zoomControl: !showLegend,
+  minZoom: tileConfig.minZoom,
+  maxZoom: tileConfig.maxZoom,
+});
+map.attributionControl.setPrefix("");
 if (showLegend) L.control.zoom({ position: 'topright' }).addTo(map);
-L.tileLayer(
-  dark
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>', maxZoom: 19 }
-).addTo(map);
 
-const ring = dark ? "#1a1a19" : "#ffffff";
+// --- Base map --------------------------------------------------------------
+// The one Home Assistant itself draws: MapLibre over the vector tiles its
+// map_tiles proxy serves, falling back to that proxy's raster tiles where
+// WebGL2 is missing. Follows the frontend's own src/common/map/base-layer.ts,
+// including its version pins.
+const MAPLIBRE = "https://unpkg.com/maplibre-gl@5.24.0/dist/";
+const MAPLIBRE_LEAFLET =
+  "https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js";
+// Without it Arabic and Hebrew labels render reversed. MapLibre's worker loads
+// it, hence a URL rather than a script tag.
+const RTL_TEXT_PLUGIN = "/static/map/mapbox-gl-rtl-text.js";
+// Browsers keep about 16 live WebGL contexts and drop the oldest, which a
+// dashboard full of maps hits. A transient loss is restored, hence the grace.
+const CONTEXT_RESTORE_GRACE = 2000;
+const RECOVERY_THROTTLE = 30000;
+
+let token = tileConfig.token || "";
+let rasterLayer = null;
+let vectorLayer = null;
+let renewPending = false;
+let lastRenew = 0;
+let lastRecovery = 0;
+let refused = false;
+// Replaced once a base layer is up. Raster has no dark variant of its own, so
+// there it stays a no-op and the CSS filter does the work.
+let setDarkMode = () => {};
+let onTokenChange = () => {};
+
+// MapLibre's worker fetches tiles and Leaflet asks for raster ones with an
+// <img>. Neither can set a header, so the token has to ride in the URL.
+function withToken(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (parsed.origin === window.location.origin &&
+        parsed.pathname.indexOf("/api/map_tiles/") === 0) {
+      parsed.searchParams.set("token", token);
+      return parsed.href;
+    }
+  } catch (err) {
+    // Nothing we can rewrite, so hand it back untouched.
+  }
+  return url;
+}
+
+function loadAsset(tag, props) {
+  return new Promise((resolve, reject) => {
+    const el = Object.assign(document.createElement(tag), props);
+    el.onload = resolve;
+    el.onerror = () => reject(new Error(props.src || props.href));
+    document.head.appendChild(el);
+  });
+}
+
+// Rules out iOS below 15, older Android tablets and blocklisted drivers.
+function supportsWebGL2() {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    if (!gl) return false;
+    // Contexts are scarce; the probe must not keep one.
+    const lose = gl.getExtension("WEBGL_lose_context");
+    if (lose) lose.loseContext();
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function loadStyle(wantDark) {
+  const res = await fetch(wantDark ? tileConfig.styleDark : tileConfig.styleLight);
+  if (!res.ok) throw new Error("style " + res.status);
+  const style = await res.json();
+  // MapLibre rejects a relative sprite URL. Not the glyph URL: resolving that
+  // one would mangle its {fontstack} and {range} placeholders.
+  const absolute = (u) => (u.charAt(0) === "/" ? window.location.origin + u : u);
+  if (typeof style.sprite === "string") {
+    style.sprite = absolute(style.sprite);
+  } else if (Array.isArray(style.sprite)) {
+    style.sprite = style.sprite.map(
+      (sprite) => Object.assign({}, sprite, { url: absolute(sprite.url) })
+    );
+  }
+  return style;
+}
+
+function addRaster() {
+  rasterLayer = L.tileLayer(tileConfig.url, {
+    attribution: tileConfig.attribution,
+    maxZoom: tileConfig.maxZoom,
+    // OSM's raster stops at 19 and the proxy refuses higher, so Leaflet scales
+    // that level up rather than asking for tiles which are not there.
+    maxNativeZoom: tileConfig.rasterMaxZoom,
+    // Leaflet substitutes any layer option into the URL template.
+    token: token,
+  }).addTo(map);
+  if (tileConfig.token) rasterLayer.on("tileerror", renewToken);
+}
+
+async function addVector() {
+  // Only loaded on the vector path, so the raster fallback stays as light as
+  // it was.
+  await loadAsset("link", {
+    rel: "stylesheet",
+    href: MAPLIBRE + "maplibre-gl.css",
+  }).catch(() => {});
+  await loadAsset("script", { src: MAPLIBRE + "maplibre-gl.js" });
+  await loadAsset("script", { src: MAPLIBRE_LEAFLET });
+
+  try {
+    const rtl = window.maplibregl.setRTLTextPlugin(
+      new URL(RTL_TEXT_PLUGIN, window.location.href).href, true
+    );
+    if (rtl && rtl.catch) rtl.catch(() => {});
+  } catch (err) {
+    // Already requested, or unavailable. Those scripts read reversed; the rest
+    // of the map still renders.
+  }
+
+  const layer = L.maplibreGL({
+    style: await loadStyle(dark),
+    // Absolute, or the worker fetching tiles cannot resolve them.
+    transformRequest: (url) => ({ url: withToken(url) }),
+    // Draws CJK with the device's own fonts instead of fetching glyphs for it.
+    localIdeographFontFamily: "sans-serif",
+  });
+  // The adapter builds the MapLibre map in onAdd, so a refused context or a
+  // blocked worker throws here rather than earlier.
+  layer.addTo(map);
+  vectorLayer = layer;
+  watchVector(layer.getMaplibreMap());
+}
+
+function watchVector(glMap) {
+  let contextLost = false;
+  let fallbackTimer = null;
+  // Tracked apart so a failed style request rolls back to what is displayed,
+  // not to the opposite of what it asked for.
+  let applied = dark;
+  let requested = dark;
+  let latest = 0;
+
+  function onVisibility() {
+    if (contextLost) scheduleSwap();
+  }
+
+  function swapToRaster() {
+    if (!vectorLayer) return;
+    document.removeEventListener("visibilitychange", onVisibility);
+    try {
+      vectorLayer.remove();
+    } catch (err) {
+      // May never have finished being added.
+    }
+    vectorLayer = null;
+    setDarkMode = () => {};
+    addRaster();
+  }
+
+  function scheduleSwap() {
+    clearTimeout(fallbackTimer);
+    // Backgrounding drops the context too, and there it comes back on return.
+    if (!vectorLayer || document.hidden) return;
+    fallbackTimer = setTimeout(swapToRaster, CONTEXT_RESTORE_GRACE);
+  }
+
+  function applyStyle(wantDark, rebuild) {
+    // Styles are fetched, so only the newest request may touch the map.
+    const request = ++latest;
+    loadStyle(wantDark)
+      .then((style) => {
+        if (request !== latest) return;
+        applied = wantDark;
+        const gl = vectorLayer && vectorLayer.getMaplibreMap();
+        if (!gl) return;
+        // A recovery re-applies the style it already has, and MapLibre would
+        // diff that down to no change at all, leaving the refused source just
+        // as dead. Only a full reload rebuilds it. A theme change needs no
+        // such thing: those two styles differ, so the diff does the work and
+        // keeps the map on screen while it swaps.
+        gl.setStyle(style, rebuild ? { diff: false } : undefined);
+      })
+      .catch(() => {
+        if (request === latest) requested = applied;
+      });
+  }
+
+  glMap.on("webglcontextlost", () => {
+    contextLost = true;
+    scheduleSwap();
+  });
+  glMap.on("webglcontextrestored", () => {
+    contextLost = false;
+    clearTimeout(fallbackTimer);
+  });
+  document.addEventListener("visibilitychange", onVisibility);
+  map.on("unload", () => {
+    clearTimeout(fallbackTimer);
+    document.removeEventListener("visibilitychange", onVisibility);
+  });
+
+  glMap.on("error", (event) => {
+    const status = event.error && event.error.status;
+    // 403 is a lapsed token, 404 a proxy not registered yet, and no status at
+    // all a network failure. All three recover the same way. Throttled, or a
+    // proxy refusing for another reason loops.
+    if (status !== undefined && status !== 403 && status !== 404) return;
+    if (Date.now() - lastRecovery < RECOVERY_THROTTLE) return;
+    lastRecovery = Date.now();
+    refused = true;
+    renewToken();
+  });
+
+  setDarkMode = (wantDark) => {
+    if (!vectorLayer || wantDark === requested) return;
+    requested = wantDark;
+    applyStyle(wantDark);
+  };
+  // A refused request leaves the source dead: the TileJSON is fetched once and
+  // never retried, so only a new token can revive it.
+  onTokenChange = () => {
+    if (vectorLayer && refused) {
+      refused = false;
+      applyStyle(requested, true);
+    }
+  };
+}
+
+function renewToken() {
+  if (!tileConfig.token || renewPending) return;
+  if (Date.now() - lastRenew < RECOVERY_THROTTLE) return;
+  renewPending = true;
+  fetch(tileConfig.tokenUrl, { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((body) => {
+      if (!body || !body.token || body.token === token) return;
+      token = body.token;
+      if (rasterLayer) {
+        rasterLayer.options.token = token;
+        rasterLayer.redraw(); // refused tiles are cached as failures
+      }
+      onTokenChange();
+    })
+    .catch(() => {})
+    .finally(() => {
+      renewPending = false;
+      lastRenew = Date.now();
+    });
+}
+
+if (tileConfig.styleLight && token && supportsWebGL2()) {
+  addVector().catch(() => {
+    // No style, no script or no context, but still a map.
+    if (vectorLayer) {
+      try {
+        vectorLayer.remove();
+      } catch (err) {
+        // Never finished being added.
+      }
+      vectorLayer = null;
+    }
+    addRaster();
+  });
+} else {
+  addRaster();
+}
+
+// The core rotates the token every 30 minutes and a dashboard stays open far
+// longer, so renew ahead of that as well as on a refusal.
+if (tileConfig.token) setInterval(renewToken, 10 * 60 * 1000);
 const fmt = (iso, withDate) => {
   const d = new Date(iso);
   const opts = withDate
@@ -481,6 +857,7 @@ total.textContent = "I alt " +
 legend.appendChild(total);
 
 const allBounds = [];
+const themed = [];  // repainted when the OS theme flips, as the base map is
 DATA.trips.forEach((trip) => {
   const color = dark ? trip.colorDark : trip.colorLight;
   const label = fmt(trip.startTime, true) + " · " +
@@ -488,13 +865,13 @@ DATA.trips.forEach((trip) => {
     (trip.durationMin != null ? " · " + trip.durationMin + " min" : "");
 
   // white/dark casing under the line separates overlapping trips
-  L.polyline(trip.path, { color: ring, weight: 7, opacity: 0.8, interactive: false }).addTo(map);
+  const casing = L.polyline(trip.path, { color: ring, weight: 7, opacity: 0.8, interactive: false }).addTo(map);
   const line = L.polyline(trip.path, { color: color, weight: 3 }).addTo(map);
   line.bindTooltip(label, { sticky: true });
   line.on("mouseover", () => line.setStyle({ weight: 5 }));
   line.on("mouseout", () => line.setStyle({ weight: 3 }));
 
-  L.marker(trip.path[0], {
+  const start = L.marker(trip.path[0], {
     icon: L.divIcon({
       className: "",
       html: '<div class="start-icon" style="border-color:' + color + '"></div>',
@@ -519,8 +896,12 @@ DATA.trips.forEach((trip) => {
 
   const row = document.createElement("div");
   row.className = "trip";
-  row.innerHTML = '<span class="chip" style="background:' + color + '"></span>' +
-    "<span>" + label + "</span>";
+  const chip = document.createElement("span");
+  chip.className = "chip";
+  chip.style.background = color;
+  const rowLabel = document.createElement("span");
+  rowLabel.textContent = label;
+  row.append(chip, rowLabel);
   row.title = (trip.fromAddress || "?") + " → " + (trip.toAddress || "?");
   row.addEventListener("click", () => map.fitBounds(line.getBounds(), { padding: [30, 30] }));
   row.addEventListener("mouseenter", () => line.setStyle({ weight: 6 }));
@@ -528,7 +909,28 @@ DATA.trips.forEach((trip) => {
   legend.appendChild(row);
 
   allBounds.push(line.getBounds());
+  themed.push({ trip: trip, casing: casing, line: line, start: start, chip: chip });
 });
+
+// The base map restyles itself on a theme change, so the routes drawn over it
+// have to keep up; leaving one half of the page on the old palette is worse
+// than not following at all.
+if (darkQuery && darkQuery.addEventListener) {
+  darkQuery.addEventListener("change", (event) => {
+    dark = event.matches;
+    ring = dark ? "#1a1a19" : "#ffffff";
+    themed.forEach((item) => {
+      const color = dark ? item.trip.colorDark : item.trip.colorLight;
+      item.casing.setStyle({ color: ring });
+      item.line.setStyle({ color: color });
+      item.chip.style.background = color;
+      const icon = item.start.getElement();
+      const dot = icon && icon.querySelector(".start-icon");
+      if (dot) dot.style.borderColor = color;
+    });
+    setDarkMode(dark);
+  });
+}
 
 if (allBounds.length) {
   const bounds = allBounds.reduce((acc, b) => acc.extend(b), L.latLngBounds(allBounds[0]));

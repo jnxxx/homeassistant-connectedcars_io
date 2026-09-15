@@ -113,6 +113,13 @@ aspect_ratio: 75%
 
 Query parameters: `days` (default 7), `from`/`to` (`YYYY-MM-DD`, a custom date range that overrides `days`), `limit` (default 8, max 200 — the 8 newest trips get distinct colours, older ones render gray), `legend` (`true`/`false` or `1`/`0`, default true — set to false for a clean map with just the routes), `vin` (with multiple cars). The page itself has preset buttons (7/30/90/365 days) and a custom from–to date picker; it shows the total km for the selected span. With `legend=false` the panel and its controls are left out entirely and the map fills the frame, which suits small dashboard cards.
 
+### Base map
+The routes are drawn on OpenStreetMap. On Home Assistant 2026.9 and later the tiles come through the core `map_tiles` proxy, the same source the built-in map uses, so they are identified and cached by your own instance. Older cores load them from OpenStreetMap directly. CARTO is no longer used: it started stamping "API KEY REQUIRED" into tiles fetched without a key, which is what turned the map into a watermarked mess.
+
+OpenStreetMap ships a single raster style, so dark mode applies a filter over it rather than switching to a separate dark basemap. Routes, event markers and the legend keep their own colours.
+
+One thing worth knowing: because the map page is deliberately unauthenticated, it also hands out the core's rotating tile token to whoever holds the map URL. That token is only good for fetching map tiles through your instance. Treat the map URL as the secret it is, and regenerate it by removing and re-adding the integration if it leaks.
+
 ## Debugging
 It is possible to debug log the raw response from the API. This is done by setting up logging like below in configuration.yaml in Home Assistant. It is also possible to set the log level through a service call in UI.  
 

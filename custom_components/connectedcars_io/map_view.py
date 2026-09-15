@@ -22,6 +22,18 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_COLORED_TRIPS = 8  # categorical palette slots; older trips render neutral
 
+# The core map_tiles proxy (HA 2026.9+) publishes its rotating access token in
+# hass.data under its own domain. Looked up rather than imported, so this module
+# still loads on older cores, which fall back to OSM directly.
+MAP_TILES_DOMAIN = "map_tiles"
+MAP_TILES_RASTER_URL = "/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}"
+OSM_RASTER_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+OSM_ATTRIBUTION = (
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    " contributors"
+)
+MAX_TILE_ZOOM = 19  # OSM serves no raster past this
+
 # Categorical palette (light/dark mode steps) and status colors for event
 # severity. Validated with the dataviz palette validator against the map tile
 # surfaces; identity never rides on color alone (legend + letter glyphs).
@@ -99,6 +111,40 @@ def _api_iso(dt):
     return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _client_for_token(hass, token):
+    """Client of the config entry whose map token matches, or None."""
+    if not token.isascii():  # compare_digest rejects non-ASCII input
+        return None
+    for config in hass.data.get(DOMAIN, {}).values():
+        candidate = config.get("map_token")
+        if candidate and secrets.compare_digest(candidate, token):
+            return config["connectedcarsclient"]
+    return None
+
+
+def _map_tiles_token(hass):
+    """Current access token of the core map tiles proxy, or None without one."""
+    tokens = hass.data.get(MAP_TILES_DOMAIN)
+    if not tokens:
+        return None
+    try:
+        return tokens[-1]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _tile_config(hass, map_token):
+    """Base map source for the page, and where to renew its token."""
+    tile_token = _map_tiles_token(hass)
+    return {
+        "url": MAP_TILES_RASTER_URL if tile_token else OSM_RASTER_URL,
+        "token": tile_token,
+        "tokenUrl": f"/api/connectedcars_io/trips_map/{map_token}/tile_token",
+        "attribution": OSM_ATTRIBUTION,
+        "maxZoom": MAX_TILE_ZOOM,
+    }
+
+
 def _event_positions(trip):
     """Attach coordinates to each detected event by time-interpolating the
     trip's GPS track."""
@@ -158,7 +204,7 @@ def _trip_path(trip):
     return path
 
 
-def build_payload(vehicle, trips, selection, show_legend=True):
+def build_payload(vehicle, trips, selection, tiles, show_legend=True):
     """JSON-serializable payload embedded in the map page.
 
     selection is {"days": int|None, "from": "YYYY-MM-DD"|None, "to": ...} —
@@ -183,7 +229,13 @@ def build_payload(vehicle, trips, selection, show_legend=True):
                 "events": _event_positions(trip),
             }
         )
-    return {"vehicle": vehicle.get("name"), "selection": selection, "showLegend": show_legend, "trips": out}
+    return {
+        "vehicle": vehicle.get("name"),
+        "selection": selection,
+        "showLegend": show_legend,
+        "tiles": tiles,
+        "trips": out,
+    }
 
 
 def async_ensure_map_token(hass, entry):
@@ -212,12 +264,7 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
 
     async def get(self, request, token):
         """Render the map page."""
-        client = None
-        for config in self.hass.data.get(DOMAIN, {}).values():
-            candidate = config.get("map_token")
-            if candidate and secrets.compare_digest(candidate, token):
-                client = config["connectedcarsclient"]
-                break
+        client = _client_for_token(self.hass, token)
         if client is None:
             return web.Response(status=404, text="Unknown map token")
 
@@ -268,10 +315,39 @@ class ConnectedCarsTripsMapView(HomeAssistantView):
             )
             or []
         )
-        payload = build_payload(vehicle, trips, selection, show_legend)
+        payload = build_payload(
+            vehicle, trips, selection, _tile_config(self.hass, token), show_legend
+        )
         return web.Response(
             text=render_map_html(payload),
             content_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class ConnectedCarsMapTileTokenView(HomeAssistantView):
+    """Hand the map page a current base map token.
+
+    The core rotates it every 30 minutes and a dashboard stays open far longer,
+    so the page renews it here instead of reloading itself. It takes the same
+    map token that grants the page, and gives out nothing beyond the tiles that
+    page already draws.
+    """
+
+    url = "/api/connectedcars_io/trips_map/{token}/tile_token"
+    name = "api:connectedcars_io:trips_map:tile_token"
+    requires_auth = False
+
+    def __init__(self, hass) -> None:
+        """Initialize."""
+        self.hass = hass
+
+    async def get(self, request, token):
+        """Return the current base map token."""
+        if _client_for_token(self.hass, token) is None:
+            return web.Response(status=404, text="Unknown map token")
+        return web.json_response(
+            {"token": _map_tiles_token(self.hass)},
             headers={"Cache-Control": "no-store"},
         )
 
@@ -370,6 +446,19 @@ _MAP_HTML = """<!DOCTYPE html>
     background: var(--ring); border: 3px solid #000; box-sizing: border-box;
   }
   .leaflet-tooltip { font-family: inherit; }
+  /* One raster style for both themes, so dark mode filters the tiles, as
+     Home Assistant does. Routes and markers are outside this pane. */
+  @media (prefers-color-scheme: dark) {
+    .leaflet-tile-pane .leaflet-tile {
+      filter: invert(0.9) hue-rotate(170deg) brightness(1.5) contrast(1.2) saturate(0.3);
+    }
+  }
+  .leaflet-container .leaflet-control-attribution {
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    border-radius: 6px 0 0 0;
+  }
+  .leaflet-container .leaflet-control-attribution a { color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -383,12 +472,39 @@ const showLegend = DATA.showLegend !== false;
 
 const map = L.map("map", { zoomControl: !showLegend });
 if (showLegend) L.control.zoom({ position: 'topright' }).addTo(map);
-L.tileLayer(
-  dark
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>', maxZoom: 19 }
-).addTo(map);
+const tileConfig = DATA.tiles;
+const tiles = L.tileLayer(tileConfig.url, {
+  attribution: tileConfig.attribution,
+  maxZoom: tileConfig.maxZoom,
+  // Leaflet substitutes any layer option into the URL template.
+  token: tileConfig.token || "",
+}).addTo(map);
+
+// The core rotates the token every 30 minutes, and a dashboard stays open far
+// longer. Renew ahead of that, and again when a tile comes back refused.
+if (tileConfig.token) {
+  let pending = false;
+  let lastTry = 0;
+  const renewToken = () => {
+    if (pending || Date.now() - lastTry < 30000) return;
+    pending = true;
+    fetch(tileConfig.tokenUrl, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (body && body.token && body.token !== tiles.options.token) {
+          tiles.options.token = body.token;
+          tiles.redraw(); // refused tiles are cached as failures
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        pending = false;
+        lastTry = Date.now();
+      });
+  };
+  setInterval(renewToken, 10 * 60 * 1000);
+  tiles.on("tileerror", renewToken);
+}
 
 const ring = dark ? "#1a1a19" : "#ffffff";
 const fmt = (iso, withDate) => {
